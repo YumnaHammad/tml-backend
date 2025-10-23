@@ -12,6 +12,8 @@ JWT_SECRET=your-super-secret-jwt-key-here
 # Frontend URL (for CORS - update this with your frontend URL)
 FRONTEND_URL=http://localhost:3000
 
+# Last updated: Ready for Vercel deployment
+
 # Production Environment Variables (set these in Vercel dashboard)
 # MONGODB_URI=your-production-mongodb-uri
 # JWT_SECRET=your-production-jwt-secret
