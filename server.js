@@ -32,6 +32,8 @@ const PORT = process.env.PORT || 5000;
 // --------------------
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  process.env.CORS_ORIGIN,
+  'https://tml-frontend.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5001',
