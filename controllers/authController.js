@@ -102,7 +102,24 @@ const login = async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+
+    // Check if it's a database connection error or timeout
+    if (error.name === 'MongoNetworkError' || 
+        error.name === 'MongoTimeoutError' || 
+        error.name === 'MongooseError' ||
+        error.message.includes('connection') ||
+        error.message.includes('timeout') ||
+        error.message.includes('buffering')) {
+      return res.status(500).json({
+        error: 'Database connection failed',
+        message: 'Unable to connect to database. Please try again later.'
+      });
+    }
+
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message || 'An unexpected error occurred'
+    });
   }
 };
 

@@ -131,14 +131,15 @@ async function connectToMongoDB() {
 
   try {
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 0,      // No timeout - wait forever
-      socketTimeoutMS: 0,               // No socket timeout
-      connectTimeoutMS: 0,              // No connection timeout
+      serverSelectionTimeoutMS: 30000,  // 30 seconds timeout
+      socketTimeoutMS: 45000,           // 45 seconds socket timeout
+      connectTimeoutMS: 30000,          // 30 seconds connection timeout
       maxPoolSize: 10,
-      maxIdleTimeMS: 0,                 // No idle timeout
+      maxIdleTimeMS: 30000,             // 30 seconds idle timeout
       serverApi: { version: '1', strict: false },
       bufferCommands: false,            // Disable mongoose buffering
-      heartbeatFrequencyMS: 0           // Disable heartbeat timeout
+      bufferMaxEntries: 0,              // Disable buffering completely
+      heartbeatFrequencyMS: 10000       // 10 seconds heartbeat
     });
     isConnected = true;
     console.log('✅ Connected to MongoDB');
@@ -209,7 +210,13 @@ setInterval(() => {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server running' });
+  const dbStatus = isConnected ? 'connected' : 'disconnected';
+  res.json({ 
+    status: 'OK', 
+    message: 'Server running',
+    database: dbStatus,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Global error handler
