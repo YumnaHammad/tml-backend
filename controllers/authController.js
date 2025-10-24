@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs'); 
-const mongoose = require('mongoose');
 const { createAuditLog } = require('../middleware/audit'); // optional if used
 
 // ✅ REGISTER
@@ -103,19 +102,7 @@ const login = async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    
-    // Check if it's a database connection error
-    if (error.name === 'MongoNetworkError' || error.name === 'MongoTimeoutError' || error.message.includes('connection')) {
-      return res.status(500).json({ 
-        error: 'Database connection failed',
-        message: 'Unable to connect to database. Please try again later.'
-      });
-    }
-    
-    res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message || 'An unexpected error occurred'
-    });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 

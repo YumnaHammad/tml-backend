@@ -138,9 +138,7 @@ async function connectToMongoDB() {
       maxIdleTimeMS: 0,                 // No idle timeout
       serverApi: { version: '1', strict: false },
       bufferCommands: false,            // Disable mongoose buffering
-      bufferMaxEntries: 0,              // Disable mongoose buffering
-      heartbeatFrequencyMS: 0,           // Disable heartbeat timeout
-      serverSelectionRetryDelayMS: 0   // No retry delay
+      heartbeatFrequencyMS: 0           // Disable heartbeat timeout
     });
     isConnected = true;
     console.log('✅ Connected to MongoDB');
