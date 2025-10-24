@@ -1,8 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-// Load environment variables
-require('dotenv').config({ path: './env' });
+require('dotenv').config(); // Load .env file
 
 // Import route files
 const authRoutes = require('./routes/auth');
@@ -28,75 +27,59 @@ const customerRoutes = require('./routes/customers');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS - Smart configuration for both local and production
+// --------------------
+// 🧩 CORS Configuration
+// --------------------
 const allowedOrigins = [
-  // Environment variable for frontend URL
   process.env.FRONTEND_URL,
-  
-  // Local development
-  'http://localhost:3000', 
-  'http://localhost:3001', 
-  'http://localhost:5001',  // Local backend port
-  'http://localhost:5001',  // Vite default port
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:5001',
   'http://localhost:5000',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
-  'http://127.0.0.1:5001',  // Local backend port
-  'http://127.0.0.1:5173',  // Vite default port
+  'http://127.0.0.1:5173',
   'http://127.0.0.1:8080'
-].filter(Boolean); // Remove undefined values
+].filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
     console.log('CORS request from origin:', origin);
-    
-    // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin) {
-      console.log('No origin - allowing request');
+    if (!origin) return callback(null, true); // Allow Postman & mobile apps
+    if (allowedOrigins.includes(origin) || origin.includes('localhost')) {
       return callback(null, true);
     }
-    
-    if (allowedOrigins.includes(origin)) {
-      console.log('Origin allowed:', origin);
-      return callback(null, true);
-    }
-    
-    // In development, allow any localhost origin
-    if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
-      console.log('Localhost origin allowed in development:', origin);
-      return callback(null, true);
-    }
-    
-    console.log('Origin blocked:', origin);
     callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   credentials: true,
-  preflightContinue: false,
-  optionsSuccessStatus: 204
 }));
 
 app.use(express.json());
 
-// Handle preflight requests
-app.options('*', cors());
+// --------------------------
+// 🧩 MongoDB Connection Setup
+// --------------------------
+const MONGODB_URI = process.env.MONGODB_URI;
 
-// Additional CORS middleware for Vercel
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
-  }
+mongoose.connect(MONGODB_URI, {
+  maxPoolSize: 10,
+  serverApi: { version: '1', strict: false },
+})
+  .then(() => console.log('✅ MongoDB connected successfully'))
+  .catch((err) => console.error('❌ MongoDB connection error:', err));
+
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️ MongoDB disconnected, attempting reconnect...');
+  mongoose.connect(MONGODB_URI)
+    .then(() => console.log('🔁 Reconnected to MongoDB'))
+    .catch((err) => console.error('❌ Reconnection failed:', err));
 });
 
-// Use route files
+// --------------------
+// 🧩 API Route Mounting
+// --------------------
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/suppliers', supplierRoutes);
@@ -117,100 +100,41 @@ app.use('/api/city-reports', cityReportRoutes);
 app.use('/api/expected-returns', expectedReturnRoutes);
 app.use('/api/customers', customerRoutes);
 
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://inventory:leader12@cluster0.earrfsb.mongodb.net/inventory_system?retryWrites=true&w=majority';
-
-// Database connection middleware for serverless functions
-let isConnected = false;
-
-async function connectToMongoDB() {
-  if (isConnected) {
-    console.log('✅ MongoDB already connected');
-    return;
-  }
-
-  try {
-    await mongoose.connect(MONGODB_URI, {
-      maxPoolSize: 10,
-      serverApi: { version: '1', strict: false }
-    });
-    isConnected = true;
-    console.log('✅ Connected to MongoDB');
-  } catch (error) {
-    console.error('❌ MongoDB Error:', error.message);
-    isConnected = false;
-    console.log('⚠️ Continuing without database connection');
-  }
-}
-
-// Database connection middleware
-app.use(async (req, res, next) => {
-  try {
-    if (!isConnected) {
-      console.log('🔄 Attempting database connection...');
-      await connectToMongoDB();
-    }
-    next();
-  } catch (error) {
-    console.error('Database connection failed:', error);
-    // Continue without database - don't block API calls
-    console.log('⚠️ Proceeding without database connection');
-    next();
-  }
-});
-
-// MongoDB connection event handlers
-mongoose.connection.on('connected', () => {
-  console.log('✅ MongoDB connected successfully');
-  isConnected = true;
-});
-
-mongoose.connection.on('error', (err) => {
-  console.error('❌ MongoDB connection error:', err);
-  isConnected = false;
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.log('⚠️ MongoDB disconnected');
-  isConnected = false;
-});
-
-// Simple connection monitoring
-setInterval(() => {
-  if (isConnected) {
-    console.log('✅ MongoDB connection active');
-  }
-}, 60000);
-
-// Health check
-app.get('/api/health', (req, res) => {
-  const dbStatus = isConnected ? 'connected' : 'disconnected';
-  res.json({ 
-    status: 'OK', 
+// --------------------
+// 🩺 Health Check Route
+// --------------------
+app.get('/api/health', async (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const dbStatus = dbState === 1 ? 'connected' : 'disconnected';
+  res.json({
+    status: 'OK',
     message: 'Server running',
     database: dbStatus,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
-// Global error handler
+// --------------------
+// 🧩 Error Handlers
+// --------------------
 app.use((error, req, res, next) => {
   console.error('Global error handler:', error);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Internal server error',
-    message: error.message || 'Something went wrong'
+    message: error.message || 'Something went wrong',
   });
 });
 
-// Handle 404 routes
 app.use('*', (req, res) => {
-  res.status(404).json({ 
+  res.status(404).json({
     error: 'Route not found',
-    message: `Cannot ${req.method} ${req.originalUrl}`
+    message: `Cannot ${req.method} ${req.originalUrl}`,
   });
 });
 
-// Start server (only for local development)
+// --------------------
+// 🚀 Start Local Server
+// --------------------
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`🚀 Server running at http://localhost:${PORT}`);
@@ -219,10 +143,12 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// Export app for Vercel serverless functions
+// Export for Vercel serverless
 module.exports = app;
 
-// Handle uncaught exceptions
+// --------------------
+// 🧩 Exception Handlers
+// --------------------
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
   process.exit(1);
