@@ -131,22 +131,14 @@ async function connectToMongoDB() {
 
   try {
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 30000,  // 30 seconds timeout
-      socketTimeoutMS: 45000,           // 45 seconds socket timeout
-      connectTimeoutMS: 30000,          // 30 seconds connection timeout
       maxPoolSize: 10,
-      maxIdleTimeMS: 30000,             // 30 seconds idle timeout
-      serverApi: { version: '1', strict: false },
-      bufferCommands: false,            // Disable mongoose buffering
-      bufferMaxEntries: 0,              // Disable buffering completely
-      heartbeatFrequencyMS: 10000       // 10 seconds heartbeat
+      serverApi: { version: '1', strict: false }
     });
     isConnected = true;
     console.log('✅ Connected to MongoDB');
   } catch (error) {
     console.error('❌ MongoDB Error:', error.message);
     isConnected = false;
-    // Don't throw error, just log it and continue
     console.log('⚠️ Continuing without database connection');
   }
 }
@@ -176,37 +168,19 @@ mongoose.connection.on('connected', () => {
 mongoose.connection.on('error', (err) => {
   console.error('❌ MongoDB connection error:', err);
   isConnected = false;
-  // Try to reconnect immediately
-  setTimeout(() => {
-    console.log('🔄 Attempting to reconnect to MongoDB...');
-    connectToMongoDB();
-  }, 1000);
 });
 
 mongoose.connection.on('disconnected', () => {
   console.log('⚠️ MongoDB disconnected');
   isConnected = false;
-  // Try to reconnect immediately
-  setTimeout(() => {
-    console.log('🔄 Attempting to reconnect to MongoDB...');
-    connectToMongoDB();
-  }, 1000);
 });
 
-// Keep connection alive - ping every 30 seconds
+// Simple connection monitoring
 setInterval(() => {
   if (isConnected) {
-    mongoose.connection.db.admin().ping((err, result) => {
-      if (err) {
-        console.log('⚠️ MongoDB ping failed, reconnecting...');
-        isConnected = false;
-        connectToMongoDB();
-      } else {
-        console.log('✅ MongoDB connection alive');
-      }
-    });
+    console.log('✅ MongoDB connection active');
   }
-}, 30000);
+}, 60000);
 
 // Health check
 app.get('/api/health', (req, res) => {
