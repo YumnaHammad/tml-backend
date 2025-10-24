@@ -37,8 +37,8 @@ const allowedOrigins = [
   'http://localhost:3000', 
   'http://localhost:3001', 
   'http://localhost:5001',  // Local backend port
-  'http://localhost:5173',  // Vite default port
-  'http://localhost:8080',
+  'http://localhost:5001',  // Vite default port
+  'http://localhost:5000',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
   'http://127.0.0.1:5001',  // Local backend port
@@ -131,33 +131,40 @@ async function connectToMongoDB() {
 
   try {
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 0,      // No timeout - wait forever
+      socketTimeoutMS: 0,               // No socket timeout
+      connectTimeoutMS: 0,              // No connection timeout
       maxPoolSize: 10,
-      serverApi: { version: '1', strict: false }
+      maxIdleTimeMS: 0,                 // No idle timeout
+      serverApi: { version: '1', strict: false },
+      bufferCommands: false,            // Disable mongoose buffering
+      bufferMaxEntries: 0,              // Disable mongoose buffering
+      heartbeatFrequencyMS: 0,           // Disable heartbeat timeout
+      serverSelectionRetryDelayMS: 0   // No retry delay
     });
     isConnected = true;
     console.log('✅ Connected to MongoDB');
   } catch (error) {
     console.error('❌ MongoDB Error:', error.message);
     isConnected = false;
-    throw error;
+    // Don't throw error, just log it and continue
+    console.log('⚠️ Continuing without database connection');
   }
 }
 
-// Database connection middleware
+// Database connection middleware - No timeout, always try to connect
 app.use(async (req, res, next) => {
   try {
     if (!isConnected) {
+      console.log('🔄 Attempting database connection...');
       await connectToMongoDB();
     }
     next();
   } catch (error) {
     console.error('Database connection failed:', error);
-    res.status(500).json({ 
-      error: 'Database connection failed', 
-      message: 'Unable to connect to database' 
-    });
+    // Continue without database - don't block API calls
+    console.log('⚠️ Proceeding without database connection');
+    next();
   }
 });
 
@@ -170,16 +177,58 @@ mongoose.connection.on('connected', () => {
 mongoose.connection.on('error', (err) => {
   console.error('❌ MongoDB connection error:', err);
   isConnected = false;
+  // Try to reconnect immediately
+  setTimeout(() => {
+    console.log('🔄 Attempting to reconnect to MongoDB...');
+    connectToMongoDB();
+  }, 1000);
 });
 
 mongoose.connection.on('disconnected', () => {
   console.log('⚠️ MongoDB disconnected');
   isConnected = false;
+  // Try to reconnect immediately
+  setTimeout(() => {
+    console.log('🔄 Attempting to reconnect to MongoDB...');
+    connectToMongoDB();
+  }, 1000);
 });
+
+// Keep connection alive - ping every 30 seconds
+setInterval(() => {
+  if (isConnected) {
+    mongoose.connection.db.admin().ping((err, result) => {
+      if (err) {
+        console.log('⚠️ MongoDB ping failed, reconnecting...');
+        isConnected = false;
+        connectToMongoDB();
+      } else {
+        console.log('✅ MongoDB connection alive');
+      }
+    });
+  }
+}, 30000);
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Server running' });
+});
+
+// Global error handler
+app.use((error, req, res, next) => {
+  console.error('Global error handler:', error);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: error.message || 'Something went wrong'
+  });
+});
+
+// Handle 404 routes
+app.use('*', (req, res) => {
+  res.status(404).json({ 
+    error: 'Route not found',
+    message: `Cannot ${req.method} ${req.originalUrl}`
+  });
 });
 
 // Start server (only for local development)
