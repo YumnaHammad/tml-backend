@@ -143,7 +143,7 @@ async function connectToMongoDB() {
   }
 }
 
-// Database connection middleware - No timeout, always try to connect
+// Database connection middleware
 app.use(async (req, res, next) => {
   try {
     if (!isConnected) {
