@@ -44,10 +44,12 @@ const allowedOrigins = [
   'https://tml-frontend.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
+  'http://localhost:3002',
   'http://localhost:5001',
   // 'http://localhost:5000',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
+  'http://127.0.0.1:3002',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:8080'
 ].filter(Boolean);
@@ -55,10 +57,20 @@ const allowedOrigins = [
 app.use(cors({
   origin: function (origin, callback) {
     console.log('CORS request from origin:', origin);
-    if (!origin) return callback(null, true); // Allow Postman & mobile apps
-    if (allowedOrigins.includes(origin) || origin.includes('localhost')) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Allow all localhost origins (for local development)
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
       return callback(null, true);
     }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    console.warn('CORS blocked origin:', origin);
     callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
