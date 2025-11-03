@@ -3,6 +3,14 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config(); // Load .env file
 
+// Rate limiting middleware (optional - install: npm install express-rate-limit)
+let rateLimit;
+try {
+  rateLimit = require('express-rate-limit');
+} catch (e) {
+  console.warn('express-rate-limit not installed. Run: npm install express-rate-limit for production safety.');
+}
+
 // Import route files
 const authRoutes = require('./routes/auth');
 const productRoutes = require('./routes/products');
@@ -37,7 +45,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5001',
-  'http://localhost:5000',
+  // 'http://localhost:5000',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
   'http://127.0.0.1:5173',
@@ -61,22 +69,98 @@ app.use(cors({
 app.use(express.json());
 
 // --------------------------
+// 🛡️ Rate Limiting (Protection against abuse)
+// --------------------------
+if (rateLimit) {
+  // General API rate limit - Optimized for Vercel Free + Atlas M0 limits
+  // Atlas M0: 100 ops/sec max, so we limit to 60 requests per minute per IP to stay safe
+  const apiLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute (shorter window for better UX)
+    max: 60, // Limit each IP to 60 requests per minute (stays under Atlas 100 ops/sec limit)
+    message: 'Too many requests from this IP, please try again later.',
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    skipSuccessfulRequests: false, // Count all requests
+    skipFailedRequests: false, // Count failed requests too
+  });
+
+  // Stricter limit for write operations (create/update/delete)
+  // Atlas M0 write operations are more limited, so we're more conservative
+  const writeLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 30, // Limit write operations to 30 per minute (conservative for free tier)
+    message: 'Too many write requests, please try again later.',
+  });
+
+  // Apply general rate limiting to all API routes
+  app.use('/api/', apiLimiter);
+  
+  // Apply stricter limits to write operations
+  app.use('/api/sales', writeLimiter);
+  app.use('/api/purchases', writeLimiter);
+  app.use('/api/products', writeLimiter);
+  app.use('/api/warehouses', writeLimiter);
+} else {
+  console.warn('⚠️ Rate limiting not enabled. Install express-rate-limit for production safety.');
+}
+
+// --------------------------
 // 🧩 MongoDB Connection Setup
 // --------------------------
 const MONGODB_URI = process.env.MONGODB_URI;
 
+// MongoDB connection optimized for Vercel Free + Atlas M0 Free Tier
+// Atlas M0 allows: 500 connections, 100 ops/sec, 2GB storage
 mongoose.connect(MONGODB_URI, {
-  maxPoolSize: 10,
+  maxPoolSize: 50, // Optimized for Atlas M0 free tier (500 max) - conservative to avoid hitting limits
+  minPoolSize: 5, // Keep minimum connections ready for faster responses
+  serverSelectionTimeoutMS: 5000, // How long to try selecting a server
+  socketTimeoutMS: 45000, // How long a send or receive on a socket can take before timeout
+  connectTimeoutMS: 30000, // How long to wait for initial connection
+  retryWrites: true, // Retry writes on network errors
+  retryReads: true, // Retry reads on network errors
   serverApi: { version: '1', strict: false },
+  // Heartbeat to keep connections alive in serverless
+  heartbeatFrequencyMS: 10000, // Check connection health every 10 seconds
 })
   .then(() => console.log('✅ MongoDB connected successfully'))
   .catch((err) => console.error('❌ MongoDB connection error:', err));
 
+// Enhanced connection error handling with exponential backoff
+let reconnectAttempts = 0;
+const maxReconnectAttempts = 5;
+
 mongoose.connection.on('disconnected', () => {
   console.log('⚠️ MongoDB disconnected, attempting reconnect...');
-  mongoose.connect(MONGODB_URI)
-    .then(() => console.log('🔁 Reconnected to MongoDB'))
-    .catch((err) => console.error('❌ Reconnection failed:', err));
+  reconnectAttempts++;
+  
+  if (reconnectAttempts <= maxReconnectAttempts) {
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Exponential backoff, max 30s
+    setTimeout(() => {
+      mongoose.connect(MONGODB_URI, {
+        maxPoolSize: 50,
+        minPoolSize: 5,
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+        connectTimeoutMS: 30000,
+        heartbeatFrequencyMS: 10000,
+      })
+        .then(() => {
+          console.log('🔁 Reconnected to MongoDB');
+          reconnectAttempts = 0; // Reset on successful reconnect
+        })
+        .catch((err) => {
+          console.error(`❌ Reconnection failed (attempt ${reconnectAttempts}/${maxReconnectAttempts}):`, err);
+        });
+    }, delay);
+  } else {
+    console.error('❌ Max reconnection attempts reached. Please check MongoDB connection.');
+  }
+});
+
+// Connection error handler
+mongoose.connection.on('error', (err) => {
+  console.error('❌ MongoDB connection error:', err);
 });
 
 // --------------------

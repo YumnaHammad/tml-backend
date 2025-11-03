@@ -15,8 +15,24 @@ const salesOrderSchema = new mongoose.Schema({
       type: String,
       required: true
     },
-    email: String,
-    phone: String,
+    cnNumber: {
+      type: String,
+      validate: {
+        validator: function(v) {
+          return !v || /^[A-Za-z0-9]{14}$/.test(v);
+        },
+        message: 'CN number must be exactly 14 alphanumeric characters'
+      }
+    },
+    phone: {
+      type: String,
+      validate: {
+        validator: function(v) {
+          return !v || /^0\d{3}-\d{7}$/.test(v);
+        },
+        message: 'Phone number must be in format 0XXX-XXXXXXX '
+      }
+    },
     address: {
       street: String,
       city: String,
@@ -69,6 +85,11 @@ const salesOrderSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'dispatch', 'dispatched', 'expected', 'delivered', 'confirmed_delivered', 'expected_return', 'returned', 'cancelled'],
     default: 'pending'
   },
+  qcStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
   paymentStatus: {
     type: String,
     enum: ['pending', 'paid', 'partial', 'refunded'],
@@ -77,8 +98,6 @@ const salesOrderSchema = new mongoose.Schema({
   deliveryAddress: {
     street: String,
     city: String,
-    state: String,
-    zipCode: String,
     country: String
   },
   expectedDeliveryDate: {
@@ -86,6 +105,13 @@ const salesOrderSchema = new mongoose.Schema({
   },
   actualDeliveryDate: {
     type: Date
+  },
+  agentName: {
+    type: String
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
   },
   notes: {
     type: String
@@ -122,5 +148,14 @@ salesOrderSchema.pre('save', function(next) {
   this.totalAmount = this.items.reduce((total, item) => total + item.totalPrice, 0);
   next();
 });
+
+// Add indexes for performance with large datasets
+salesOrderSchema.index({ orderDate: -1 }); // For sorting by date
+salesOrderSchema.index({ status: 1 }); // For filtering by status
+salesOrderSchema.index({ 'customerInfo.phone': 1 }); // For phone number search
+salesOrderSchema.index({ 'customerInfo.cnNumber': 1 }); // For CN number search
+salesOrderSchema.index({ createdAt: -1 }); // For timestamp sorting
+salesOrderSchema.index({ isActive: 1, orderDate: -1 }); // Compound index for common queries
+salesOrderSchema.index({ orderNumber: 1 }); // Already unique, but explicit index helps
 
 module.exports = mongoose.model('SalesOrder', salesOrderSchema);

@@ -16,21 +16,22 @@ router.get('/register', (req, res) => {
       lastName: 'string (required)',
       email: 'string (required)',
       password: 'string (required)',
-      role: 'string (optional, default: "employee")'
+      role: 'string (optional, default: "agent")'
     },
     example: {
       firstName: 'John',
       lastName: 'Doe',
       email: 'john.doe@example.com',
       password: 'SecurePassword123',
-      role: 'employee'
+      role: 'agent'
     },
-    possibleRoles: ['admin', 'manager', 'employee'],
+    possibleRoles: ['admin', 'manager', 'agent'],
     note: 'Please use POST method to register. GET method is for documentation only.'
   });
 });
 
-router.post('/register', register); // POST http://localhost:5000/api/auth/register
+// router.post('/register', register); // POST http://localhost:5000/api/auth/register
+router.post('/register', register); // POST https://tml-backend.vercel.app/api/auth/register
 
 // GET /login - Returns API documentation for the login endpoint
 router.get('/login', (req, res) => {
@@ -51,7 +52,8 @@ router.get('/login', (req, res) => {
   });
 });
 
-router.post('/login', login);       // POST http://localhost:5000/api/auth/login
+// router.post('/login', login);       // POST http://localhost:5000/api/auth/login
+router.post('/login', login);       // POST https://tml-backend.vercel.app/api/auth/login
 router.get('/profile', authenticateToken, getProfile); // GET profile
 
 // GET /users - Public endpoint to view all registered users (for testing)

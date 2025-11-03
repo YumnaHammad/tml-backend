@@ -4,7 +4,7 @@ const { createAuditLog } = require('../middleware/audit');
 // Create a new sales order
 const createSalesOrder = async (req, res) => {
   try {
-    const { customerInfo, items, deliveryAddress, expectedDeliveryDate, notes } = req.body;
+    const { customerInfo, items, deliveryAddress, expectedDeliveryDate, notes, agentName, timestamp } = req.body;
 
     // Validate required fields
     if (!customerInfo?.address?.city) {
@@ -102,6 +102,8 @@ const createSalesOrder = async (req, res) => {
       deliveryAddress,
       expectedDeliveryDate,
       notes,
+      agentName: agentName || null,
+      timestamp: timestamp ? new Date(timestamp) : new Date(),
       createdBy: userId
     });
 
@@ -151,7 +153,7 @@ const createSalesOrder = async (req, res) => {
 // Get all sales orders
 const getAllSalesOrders = async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, startDate, endDate, isActive } = req.query;
+    const { page = 1, limit = 10, status, startDate, endDate, isActive, search } = req.query;
     
     // Show all sales orders by default, allow filtering by isActive
     let query = {};
@@ -166,19 +168,32 @@ const getAllSalesOrders = async (req, res) => {
       if (endDate) query.orderDate.$lte = new Date(endDate);
     }
 
+    // Add search functionality for phone number and CN number
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i'); // Case-insensitive search
+      query.$or = [
+        { 'customerInfo.phone': searchRegex },
+        { 'customerInfo.cnNumber': searchRegex }
+      ];
+    }
+
+    // Convert limit and page to numbers, with safety limits
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(1000, Math.max(1, parseInt(limit) || 10)); // Max 1000 per page for safety
+
     const salesOrders = await SalesOrder.find(query)
       .populate('items.productId', 'name sku')
       .populate('createdBy', 'firstName lastName')
       .sort({ orderDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(limitNum)
+      .skip((pageNum - 1) * limitNum);
 
     const total = await SalesOrder.countDocuments(query);
 
     res.json({
       salesOrders,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      totalPages: Math.ceil(total / limitNum),
+      currentPage: pageNum,
       total
     });
 
@@ -205,6 +220,111 @@ const getSalesOrderById = async (req, res) => {
 
   } catch (error) {
     console.error('Get sales order error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Update sales order (full update)
+const updateSalesOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    const salesOrder = await SalesOrder.findById(id);
+    if (!salesOrder) {
+      return res.status(404).json({ error: 'Sales order not found' });
+    }
+
+    const oldStatus = salesOrder.status;
+    const newStatus = updateData.status;
+
+    // Update allowed fields
+    if (updateData.customerInfo) salesOrder.customerInfo = { ...salesOrder.customerInfo, ...updateData.customerInfo };
+    if (updateData.deliveryAddress) salesOrder.deliveryAddress = { ...salesOrder.deliveryAddress, ...updateData.deliveryAddress };
+    if (updateData.agentName !== undefined) salesOrder.agentName = updateData.agentName;
+    if (updateData.notes !== undefined) salesOrder.notes = updateData.notes;
+    if (updateData.items) {
+      salesOrder.items = updateData.items.map(item => ({
+        productId: item.productId,
+        variantId: item.variantId || null,
+        variantName: item.variantName || null,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.quantity * item.unitPrice,
+        isOutOfStock: item.isOutOfStock || false
+      }));
+      // Recalculate total amount
+      salesOrder.totalAmount = salesOrder.items.reduce((sum, item) => sum + item.totalPrice, 0);
+    }
+    
+    // If status is being updated and it's different, update status separately to trigger warehouse logic
+    if (newStatus && newStatus !== oldStatus) {
+      salesOrder.status = newStatus;
+      // The pre-save hooks and status-specific logic will be handled by updateSalesOrderStatus logic
+      // For now, just update the status and let the existing save handle it
+    }
+    
+    await salesOrder.save();
+
+    // If status changed, apply warehouse updates using the same logic as status update
+    if (newStatus && newStatus !== oldStatus) {
+      const Warehouse = require('../models/Warehouse');
+      const StockMovement = require('../models/StockMovement');
+      
+      // Handle DISPATCH status - reserve stock
+      if (newStatus === 'dispatch' || newStatus === 'dispatched') {
+        const warehouses = await Warehouse.find({ isActive: true });
+        
+        for (const item of salesOrder.items) {
+          const itemProductId = (item.productId && item.productId._id)
+            ? item.productId._id.toString()
+            : item.productId.toString();
+          let quantityToReserve = item.quantity;
+          
+          for (const warehouse of warehouses) {
+            if (quantityToReserve <= 0) break;
+            
+            const stockItem = warehouse.currentStock.find(stock => 
+              stock.productId.toString() === itemProductId &&
+              (stock.variantId || null) === (item.variantId || null)
+            );
+            
+            if (stockItem) {
+              const availableQty = (stockItem.quantity || 0) - (stockItem.reservedQuantity || 0);
+              const reserveQty = Math.min(availableQty, quantityToReserve);
+              
+              if (reserveQty > 0) {
+                stockItem.reservedQuantity = (stockItem.reservedQuantity || 0) + reserveQty;
+                quantityToReserve -= reserveQty;
+                await warehouse.save();
+                
+                const stockMovement = new StockMovement({
+                  productId: item.productId,
+                  warehouseId: warehouse._id,
+                  movementType: 'reserved',
+                  quantity: reserveQty,
+                  previousQuantity: stockItem.quantity - stockItem.reservedQuantity + reserveQty,
+                  newQuantity: stockItem.quantity - stockItem.reservedQuantity,
+                  referenceType: 'sales_order',
+                  referenceId: salesOrder._id,
+                  notes: `Reserved for sales order ${salesOrder.orderNumber} (status change)`,
+                  createdBy: req.user?._id || salesOrder.createdBy
+                });
+                await stockMovement.save();
+              }
+            }
+          }
+        }
+      }
+      // Add more status transition logic as needed (delivered, confirmed_delivered, etc.)
+    }
+
+    res.json({ 
+      message: 'Sales order updated successfully',
+      salesOrder 
+    });
+  } catch (error) {
+    console.error('Update sales order error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -923,12 +1043,42 @@ const deleteSalesOrder = async (req, res) => {
   }
 };
 
+// Update QC status
+const updateQCStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { qcStatus } = req.body;
+
+    if (!qcStatus || !['pending', 'approved', 'rejected'].includes(qcStatus)) {
+      return res.status(400).json({ error: 'Invalid QC status. Must be pending, approved, or rejected' });
+    }
+
+    const salesOrder = await SalesOrder.findById(id);
+    if (!salesOrder) {
+      return res.status(404).json({ error: 'Sales order not found' });
+    }
+
+    salesOrder.qcStatus = qcStatus;
+    await salesOrder.save();
+
+    res.json({ 
+      message: `QC status updated to ${qcStatus}`,
+      salesOrder 
+    });
+  } catch (error) {
+    console.error('Update QC status error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   createSalesOrder,
   getAllSalesOrders,
   getSalesOrderById,
+  updateSalesOrder,
   updateSalesOrderStatus,
   dispatchSalesOrder,
   markDeliveryCompleted,
-  deleteSalesOrder
+  deleteSalesOrder,
+  updateQCStatus
 };

@@ -2,46 +2,14 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs'); 
 const { createAuditLog } = require('../middleware/audit'); // optional if used
+const { sendRegistrationNotification } = require('../utils/emailService');
 
-// ✅ REGISTER
+// ✅ REGISTER - DISABLED
 const register = async (req, res) => {
-  try {
-    const { firstName, lastName, email, password, role } = req.body;
-
-    if (!firstName || !lastName || !email || !password) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
-      return res.status(400).json({ error: 'Email already registered' });
-    }
-
-    const newUser = new User({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.toLowerCase().trim(),
-      password: password.trim(), // ⚠️ Don't hash manually here
-      role: role || 'employee',
-      isActive: true,
-    });
-
-    await newUser.save();
-
-    res.status(201).json({
-      message: 'User registered successfully',
-      user: {
-        id: newUser._id,
-        email: newUser.email,
-        firstName: newUser.firstName,
-        lastName: newUser.lastName,
-        role: newUser.role,
-      },
-    });
-  } catch (error) {
-    console.error('Register error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  // Registration is completely disabled
+  return res.status(403).json({ 
+    error: 'Registration is currently disabled. New user registration is not allowed. Please contact administrator.' 
+  });
 };
 
 
@@ -58,10 +26,20 @@ const login = async (req, res) => {
     const cleanedEmail = email.toString().toLowerCase().trim();
     const cleanedPassword = password.toString().trim();
     
+    // Only allow specific authorized emails to login
+    const allowedEmails = [
+      'admin@tml.com',
+      'manager@tml.com',
+      'agent@tml.com'
+    ];
+    
+    if (!allowedEmails.includes(cleanedEmail)) {
+      return res.status(403).json({ error: 'Invalid credentials' });
+    }
 
     const user = await User.findOne({ email: cleanedEmail });
     if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials - user not found' });
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (!user.isActive) {
@@ -73,14 +51,6 @@ const login = async (req, res) => {
     const isPasswordValid = await user.comparePassword(cleanedPassword);
 
     if (!isPasswordValid) {
-    
-      for (let i = 0; i < cleanedPassword.length; i++) {
-        console.log(`  ${i}: '${cleanedPassword[i]}' - Code: ${cleanedPassword.charCodeAt(i)}`);
-      }
-      
-      // Try different comparison methods
-      const directCompare = await bcrypt.compare(cleanedPassword, user.password);
-      
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 

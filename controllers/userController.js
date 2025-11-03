@@ -33,7 +33,7 @@ const createUser = async (req, res) => {
       lastName,
       email: email.toLowerCase(),
       password: hashedPassword,
-      role: role || 'employee',
+      role: role || 'agent',
       isActive: true,
     });
 

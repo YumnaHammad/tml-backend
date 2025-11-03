@@ -13,7 +13,7 @@ const stockMovementSchema = new mongoose.Schema({
   },
   movementType: {
     type: String,
-    enum: ['in', 'out', 'transfer_in', 'transfer_out', 'adjustment', 'return', 'reserved', 'unreserved'],
+    enum: ['in', 'out', 'transfer_in', 'transfer_out', 'adjustment', 'return', 'reserved', 'unreserved', 'confirmed_delivery'],
     required: true
   },
   quantity: {
