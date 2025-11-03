@@ -89,25 +89,103 @@ const createSalesOrder = async (req, res) => {
       });
     }
 
-    // Generate order number
-    const count = await SalesOrder.countDocuments();
-    const orderNumber = `SO-${String(count + 1).padStart(4, '0')}`;
+    // Generate unique order number using atomic operation with retry
+    let salesOrder;
+    let orderNumber;
+    
+    // Strategy: Find max order number, then use findOneAndUpdate with upsert to ensure atomicity
+    // But since we can't use that for order number generation, we'll use a simple retry loop
+    let attempts = 0;
+    const maxAttempts = 100;
+    
+    // Get the maximum order number using aggregation
+    let startNumber = 0;
+    try {
+      const result = await SalesOrder.aggregate([
+        { 
+          $project: { 
+            orderNum: { 
+              $toInt: { 
+                $arrayElemAt: [
+                  { $split: [{ $ifNull: ["$orderNumber", "SO-0000"] }, "-"] },
+                  1
+                ]
+              }
+            }
+          }
+        },
+        { $group: { _id: null, maxOrder: { $max: "$orderNum" } } }
+      ]);
+      
+      if (result && result.length > 0 && result[0].maxOrder !== null && result[0].maxOrder !== undefined) {
+        startNumber = result[0].maxOrder;
+      }
+    } catch (aggError) {
+      // Fallback: use findOne with sort
+      console.warn('Aggregation failed, using fallback method:', aggError.message);
+      const lastOrder = await SalesOrder.findOne({}, { orderNumber: 1 }).sort({ orderNumber: -1 });
+      if (lastOrder && lastOrder.orderNumber) {
+        const match = lastOrder.orderNumber.match(/SO-(\d+)/);
+        if (match) {
+          startNumber = parseInt(match[1]) || 0;
+        }
+      }
+    }
+    
+    let candidateNumber = startNumber + 1;
+    console.log(`Starting order number generation from: ${startNumber}, next candidate: ${candidateNumber}`);
+    
+    // Retry loop with database checks
+    while (attempts < maxAttempts) {
+      orderNumber = `SO-${String(candidateNumber).padStart(4, '0')}`;
+      
+      try {
+        // Check if exists
+        const exists = await SalesOrder.findOne({ orderNumber: orderNumber });
+        if (exists) {
+          candidateNumber++;
+          attempts++;
+          continue;
+        }
+        
+        // Try to create with this order number
+        salesOrder = new SalesOrder({
+          orderNumber,
+          customerInfo,
+          items: validatedItems,
+          totalAmount,
+          deliveryAddress,
+          expectedDeliveryDate,
+          notes,
+          agentName: agentName || null,
+          timestamp: timestamp ? new Date(timestamp) : new Date(),
+          createdBy: userId
+        });
 
-    // Create sales order
-    const salesOrder = new SalesOrder({
-      orderNumber,
-      customerInfo,
-      items: validatedItems,
-      totalAmount,
-      deliveryAddress,
-      expectedDeliveryDate,
-      notes,
-      agentName: agentName || null,
-      timestamp: timestamp ? new Date(timestamp) : new Date(),
-      createdBy: userId
-    });
-
-    await salesOrder.save();
+        await salesOrder.save();
+        // Success!
+        break;
+        
+      } catch (saveError) {
+        // Handle duplicate key error
+        if (saveError.code === 11000) {
+          candidateNumber++;
+          attempts++;
+          if (attempts >= maxAttempts) {
+            throw new Error('Failed to generate unique order number after 100 attempts. Please try again.');
+          }
+          // Small delay
+          await new Promise(resolve => setTimeout(resolve, 10));
+          continue;
+        }
+        // Other errors should be thrown
+        throw saveError;
+      }
+    }
+    
+    if (!salesOrder) {
+      throw new Error('Failed to create sales order: Could not generate unique order number.');
+    }
     
     // Reservation will occur on dispatch; keep empty array for response compatibility
     const reservedStock = [];
@@ -140,13 +218,31 @@ const createSalesOrder = async (req, res) => {
     });
 
   } catch (error) {
+    // Log full error for debugging
+    console.error('Error creating sales order:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error code:', error.code);
+    console.error('Error keyPattern:', error.keyPattern);
+    
     // Provide detailed error message to help debugging
     const errorMessage = error.message || 'Internal server error';
-    res.status(500).json({ 
+    const errorDetails = {
       error: 'Failed to create sales order',
       details: errorMessage,
-      suggestion: 'Please check if products have stock in warehouse and try again'
-    });
+      code: error.code,
+      keyPattern: error.keyPattern
+    };
+    
+    // If it's a duplicate key error, provide specific message
+    if (error.code === 11000) {
+      errorDetails.error = 'Duplicate order number detected';
+      errorDetails.details = `Order number already exists. ${errorMessage}`;
+      errorDetails.suggestion = 'Please try again - the system will generate a new number automatically';
+    } else {
+      errorDetails.suggestion = 'Please check your data and try again. If the problem persists, contact support.';
+    }
+    
+    res.status(500).json(errorDetails);
   }
 };
 
