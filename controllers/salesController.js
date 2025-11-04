@@ -1167,6 +1167,195 @@ const updateQCStatus = async (req, res) => {
   }
 };
 
+// Check for duplicate phone numbers in sales orders
+const checkDuplicatePhoneNumbers = async (req, res) => {
+  try {
+    const { limit = 1000 } = req.query;
+    const limitNum = Math.min(parseInt(limit) || 1000, 5000); // Max 5000 for safety
+    
+    // Get all active sales orders
+    const allOrders = await SalesOrder.find({ 
+      isActive: { $ne: false },
+      'customerInfo.phone': { $exists: true, $ne: null, $ne: '' }
+    })
+    .select('orderNumber customerInfo items totalAmount timestamp status agentName')
+    .sort({ timestamp: -1 })
+    .limit(limitNum);
+    
+    // Group orders by normalized phone number
+    const phoneGroups = {};
+    
+    for (const order of allOrders) {
+      const phone = order.customerInfo?.phone;
+      if (!phone) continue;
+      
+      // Normalize phone number (remove spaces, dashes, convert to lowercase)
+      const normalizedPhone = phone.replace(/[\s-]/g, '').toLowerCase();
+      
+      if (!phoneGroups[normalizedPhone]) {
+        phoneGroups[normalizedPhone] = [];
+      }
+      phoneGroups[normalizedPhone].push(order);
+    }
+    
+    // Find phone numbers with multiple orders
+    const duplicatePhones = [];
+    
+    for (const [normalizedPhone, orders] of Object.entries(phoneGroups)) {
+      if (orders.length > 1) {
+        // Group by customer name to see if same customer or different customers
+        const customerGroups = {};
+        
+        for (const order of orders) {
+          const customerName = order.customerInfo?.name?.trim().toLowerCase() || 'Unknown';
+          if (!customerGroups[customerName]) {
+            customerGroups[customerName] = [];
+          }
+          customerGroups[customerName].push(order);
+        }
+        
+        const uniqueCustomers = Object.keys(customerGroups).length;
+        const totalOrders = orders.length;
+        
+        // Calculate statistics
+        const totalAmount = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+        const statusCounts = {};
+        orders.forEach(o => {
+          statusCounts[o.status] = (statusCounts[o.status] || 0) + 1;
+        });
+        
+        duplicatePhones.push({
+          phoneNumber: orders[0].customerInfo.phone, // Original format
+          normalizedPhone: normalizedPhone,
+          totalOrders: totalOrders,
+          uniqueCustomers: uniqueCustomers,
+          totalAmount: totalAmount,
+          averageOrderAmount: totalAmount / totalOrders,
+          statusCounts: statusCounts,
+          orders: orders.map(order => ({
+            orderNumber: order.orderNumber,
+            timestamp: order.timestamp,
+            customerName: order.customerInfo?.name,
+            phone: order.customerInfo?.phone,
+            cnNumber: order.customerInfo?.cnNumber,
+            totalAmount: order.totalAmount,
+            status: order.status,
+            agentName: order.agentName,
+            itemsCount: order.items?.length || 0
+          })),
+          customers: Object.keys(customerGroups).map(name => ({
+            name: name,
+            orderCount: customerGroups[name].length,
+            orders: customerGroups[name].map(o => o.orderNumber)
+          })),
+          isSameCustomer: uniqueCustomers === 1,
+          message: uniqueCustomers === 1 
+            ? `Phone number used for ${totalOrders} orders by the same customer`
+            : `Phone number used for ${totalOrders} orders by ${uniqueCustomers} different customers`
+        });
+      }
+    }
+    
+    // Sort by total orders (descending)
+    duplicatePhones.sort((a, b) => b.totalOrders - a.totalOrders);
+    
+    // Calculate summary statistics
+    const summary = {
+      totalOrdersChecked: allOrders.length,
+      uniquePhoneNumbers: Object.keys(phoneGroups).length,
+      duplicatePhoneNumbers: duplicatePhones.length,
+      phoneNumbersWithMultipleOrders: duplicatePhones.filter(p => p.totalOrders > 1).length,
+      phoneNumbersWithDifferentCustomers: duplicatePhones.filter(p => !p.isSameCustomer).length,
+      totalOrdersWithDuplicates: duplicatePhones.reduce((sum, p) => sum + p.totalOrders, 0)
+    };
+    
+    res.json({
+      message: `Checked ${allOrders.length} orders for duplicate phone numbers`,
+      summary: summary,
+      duplicates: duplicatePhones
+    });
+    
+  } catch (error) {
+    console.error('Check duplicate phone numbers error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
+// Check for duplicate phone numbers for a specific phone number
+const checkPhoneNumberDuplicates = async (req, res) => {
+  try {
+    const { phone } = req.query;
+    
+    if (!phone) {
+      return res.status(400).json({ error: 'Phone number is required' });
+    }
+    
+    // Normalize phone number
+    const normalizedPhone = phone.replace(/[\s-]/g, '').toLowerCase();
+    const phoneRegex = new RegExp(normalizedPhone.replace(/[-\s]/g, '[\\s-]*'), 'i');
+    
+    // Find all orders with this phone number
+    const orders = await SalesOrder.find({
+      isActive: { $ne: false },
+      'customerInfo.phone': phoneRegex
+    })
+    .select('orderNumber customerInfo items totalAmount timestamp status agentName')
+    .sort({ timestamp: -1 });
+    
+    if (orders.length === 0) {
+      return res.json({
+        message: `No orders found for phone number: ${phone}`,
+        phoneNumber: phone,
+        orders: []
+      });
+    }
+    
+    // Group by customer name
+    const customerGroups = {};
+    for (const order of orders) {
+      const customerName = order.customerInfo?.name?.trim().toLowerCase() || 'Unknown';
+      if (!customerGroups[customerName]) {
+        customerGroups[customerName] = [];
+      }
+      customerGroups[customerName].push(order);
+    }
+    
+    const uniqueCustomers = Object.keys(customerGroups).length;
+    const totalAmount = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+    
+    res.json({
+      message: `Found ${orders.length} order(s) for phone number: ${phone}`,
+      phoneNumber: phone,
+      normalizedPhone: normalizedPhone,
+      totalOrders: orders.length,
+      uniqueCustomers: uniqueCustomers,
+      totalAmount: totalAmount,
+      averageOrderAmount: totalAmount / orders.length,
+      isSameCustomer: uniqueCustomers === 1,
+      orders: orders.map(order => ({
+        orderNumber: order.orderNumber,
+        timestamp: order.timestamp,
+        customerName: order.customerInfo?.name,
+        phone: order.customerInfo?.phone,
+        cnNumber: order.customerInfo?.cnNumber,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        agentName: order.agentName,
+        itemsCount: order.items?.length || 0
+      })),
+      customers: Object.keys(customerGroups).map(name => ({
+        name: name,
+        orderCount: customerGroups[name].length,
+        orders: customerGroups[name].map(o => o.orderNumber)
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Check phone number duplicates error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+};
+
 module.exports = {
   createSalesOrder,
   getAllSalesOrders,
@@ -1176,5 +1365,7 @@ module.exports = {
   dispatchSalesOrder,
   markDeliveryCompleted,
   deleteSalesOrder,
-  updateQCStatus
+  updateQCStatus,
+  checkDuplicatePhoneNumbers,
+  checkPhoneNumberDuplicates
 };
