@@ -264,12 +264,13 @@ const getAllSalesOrders = async (req, res) => {
       if (endDate) query.orderDate.$lte = new Date(endDate);
     }
 
-    // Add search functionality for phone number and CN number
+    // Add search functionality for phone number, CN number, and agent name
     if (search && search.trim()) {
       const searchRegex = new RegExp(search.trim(), 'i'); // Case-insensitive search
       query.$or = [
         { 'customerInfo.phone': searchRegex },
-        { 'customerInfo.cnNumber': searchRegex }
+        { 'customerInfo.cnNumber': searchRegex },
+        { 'agentName': searchRegex }
       ];
     }
 
