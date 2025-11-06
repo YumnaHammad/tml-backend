@@ -198,7 +198,7 @@ const createPurchase = async (req, res) => {
 // Get all purchases
 const getAllPurchases = async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, supplierId, startDate, endDate, isActive } = req.query;
+    const { page = 1, limit = 10, status, supplierId, startDate, endDate, isActive, search } = req.query;
     
     // Show all purchases by default, allow filtering by isActive
     let query = {};
@@ -208,26 +208,112 @@ const getAllPurchases = async (req, res) => {
     
     if (status) query.status = status;
     if (supplierId) query.supplierId = supplierId;
+    
+    // Date filtering - use purchaseDate, timestamp, or createdAt
+    const dateConditions = [];
     if (startDate || endDate) {
-      query.purchaseDate = {};
-      if (startDate) query.purchaseDate.$gte = new Date(startDate);
-      if (endDate) query.purchaseDate.$lte = new Date(endDate);
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        dateConditions.push(
+          { purchaseDate: { $gte: start, $lte: end } },
+          { timestamp: { $gte: start, $lte: end } },
+          { createdAt: { $gte: start, $lte: end } }
+        );
+      } else if (startDate) {
+        const start = new Date(startDate);
+        dateConditions.push(
+          { purchaseDate: { $gte: start } },
+          { timestamp: { $gte: start } },
+          { createdAt: { $gte: start } }
+        );
+      } else if (endDate) {
+        const end = new Date(endDate);
+        dateConditions.push(
+          { purchaseDate: { $lte: end } },
+          { timestamp: { $lte: end } },
+          { createdAt: { $lte: end } }
+        );
+      }
     }
 
+    // Add search functionality for supplier name and phone
+    const isSearching = search && search.trim();
+    const searchConditions = [];
+    if (isSearching) {
+      const searchRegex = new RegExp(search.trim(), 'i'); // Case-insensitive search
+      const Supplier = require('../models/Supplier');
+      
+      // Find suppliers matching the search
+      const matchingSuppliers = await Supplier.find({
+        $or: [
+          { name: searchRegex },
+          { phone: searchRegex },
+          { email: searchRegex },
+          { supplierCode: searchRegex }
+        ]
+      }).select('_id');
+      
+      const supplierIds = matchingSuppliers.map(s => s._id);
+      
+      if (supplierIds.length > 0) {
+        searchConditions.push(
+          { supplierId: { $in: supplierIds } },
+          { purchaseNumber: searchRegex },
+          { notes: searchRegex }
+        );
+      } else {
+        searchConditions.push(
+          { purchaseNumber: searchRegex },
+          { notes: searchRegex }
+        );
+      }
+    }
+
+    // Combine date and search conditions
+    if (dateConditions.length > 0 && searchConditions.length > 0) {
+      query.$and = [
+        { $or: dateConditions },
+        { $or: searchConditions }
+      ];
+    } else if (dateConditions.length > 0) {
+      query.$or = dateConditions;
+    } else if (searchConditions.length > 0) {
+      query.$or = searchConditions;
+    }
+
+    // Convert limit and page to numbers, with safety limits
+    // When searching OR when limit is high (All Time), allow much higher limit to show all results
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const requestedLimit = parseInt(limit) || 10;
+    const isHighLimit = requestedLimit >= 1000; // "All Time" or search uses high limit
+    
+    let limitNum;
+    if (isSearching || isHighLimit) {
+      // When searching or "All Time", show all results (up to 10000 for safety)
+      limitNum = Math.min(10000, Math.max(1, requestedLimit));
+    } else {
+      // Normal pagination when not searching
+      limitNum = Math.min(1000, Math.max(1, requestedLimit));
+    }
+
+    // Determine sort order - default to newest first (purchaseDate descending)
+    let sortOrder = { purchaseDate: -1 }; // Default: newest first
+
     const purchases = await Purchase.find(query)
-      .populate('supplierId', 'name supplierCode')
+      .populate('supplierId', 'name supplierCode phone email')
       .populate('items.productId', 'name sku')
       .populate('createdBy', 'firstName lastName')
-      .sort({ purchaseDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .sort(sortOrder)
+      .limit(limitNum)
+      .skip((isSearching || isHighLimit) ? 0 : (pageNum - 1) * limitNum); // Skip pagination when searching or "All Time"
 
     const total = await Purchase.countDocuments(query);
 
     res.json({
       purchases,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      totalPages: Math.ceil(total / limitNum),
+      currentPage: pageNum,
       total
     });
 

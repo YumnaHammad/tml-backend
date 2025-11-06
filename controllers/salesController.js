@@ -259,13 +259,36 @@ const getAllSalesOrders = async (req, res) => {
     
     if (status) query.status = status;
     if (startDate || endDate) {
-      query.orderDate = {};
-      if (startDate) query.orderDate.$gte = new Date(startDate);
-      if (endDate) query.orderDate.$lte = new Date(endDate);
+      // Use orderDate, timestamp, or createdAt for date filtering
+      query.$or = [];
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        query.$or = [
+          { orderDate: { $gte: start, $lte: end } },
+          { timestamp: { $gte: start, $lte: end } },
+          { createdAt: { $gte: start, $lte: end } }
+        ];
+      } else if (startDate) {
+        const start = new Date(startDate);
+        query.$or = [
+          { orderDate: { $gte: start } },
+          { timestamp: { $gte: start } },
+          { createdAt: { $gte: start } }
+        ];
+      } else if (endDate) {
+        const end = new Date(endDate);
+        query.$or = [
+          { orderDate: { $lte: end } },
+          { timestamp: { $lte: end } },
+          { createdAt: { $lte: end } }
+        ];
+      }
     }
 
     // Add search functionality for phone number, CN number, and agent name
-    if (search && search.trim()) {
+    const isSearching = search && search.trim();
+    if (isSearching) {
       const searchRegex = new RegExp(search.trim(), 'i'); // Case-insensitive search
       query.$or = [
         { 'customerInfo.phone': searchRegex },
@@ -275,15 +298,29 @@ const getAllSalesOrders = async (req, res) => {
     }
 
     // Convert limit and page to numbers, with safety limits
+    // When searching OR when limit is high (All Time), allow much higher limit to show all results
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.min(1000, Math.max(1, parseInt(limit) || 10)); // Max 1000 per page for safety
+    const requestedLimit = parseInt(limit) || 10;
+    const isHighLimit = requestedLimit >= 1000; // "All Time" or search uses high limit
+    
+    let limitNum;
+    if (isSearching || isHighLimit) {
+      // When searching or "All Time", show all results (up to 10000 for safety)
+      limitNum = Math.min(10000, Math.max(1, requestedLimit));
+    } else {
+      // Normal pagination when not searching
+      limitNum = Math.min(1000, Math.max(1, requestedLimit));
+    }
 
+    // Determine sort order - default to newest first (orderDate descending)
+    let sortOrder = { orderDate: -1 }; // Default: newest first
+    
     const salesOrders = await SalesOrder.find(query)
       .populate('items.productId', 'name sku')
       .populate('createdBy', 'firstName lastName')
-      .sort({ orderDate: -1 })
+      .sort(sortOrder)
       .limit(limitNum)
-      .skip((pageNum - 1) * limitNum);
+      .skip((isSearching || isHighLimit) ? 0 : (pageNum - 1) * limitNum); // Skip pagination when searching or "All Time"
 
     const total = await SalesOrder.countDocuments(query);
 
