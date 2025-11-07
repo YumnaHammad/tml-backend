@@ -1,6 +1,46 @@
 const { SalesOrder, Product, Customer, Warehouse, StockMovement, SalesShipment } = require('../models');
 const { createAuditLog } = require('../middleware/audit');
 
+const normalizeId = (value) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return value.toString();
+
+  let current = value;
+  const visited = new Set();
+  let depth = 0;
+  const MAX_DEPTH = 6;
+
+  while (current && typeof current === 'object' && depth < MAX_DEPTH && !visited.has(current)) {
+    visited.add(current);
+
+    if (typeof current === 'string') return current;
+    if (typeof current === 'number') return current.toString();
+
+    if (current._id) {
+      current = current._id;
+      depth += 1;
+      continue;
+    }
+
+    if (current.id) {
+      const idValue = current.id;
+      if (typeof idValue === 'string') return idValue;
+      current = idValue;
+      depth += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  if (current && typeof current === 'object' && typeof current.toString === 'function' && current.toString !== Object.prototype.toString) {
+    return current.toString();
+  }
+
+  return String(current);
+};
+
 // Create a new sales order
 const createSalesOrder = async (req, res) => {
   try {
@@ -37,27 +77,16 @@ const createSalesOrder = async (req, res) => {
         return res.status(404).json({ error: `Product with ID ${item.productId} not found` });
       }
 
-      const toIdString = (value) => {
-        if (!value) return '';
-        if (typeof value === 'string') return value;
-        if (typeof value === 'object') {
-          if (value._id) return toIdString(value._id);
-          if (value.id) return toIdString(value.id);
-        }
-        if (typeof value === 'number') return value.toString();
-        return value.toString ? value.toString() : String(value);
-      };
-
-      const requestedProductId = toIdString(item.productId);
-      const requestedVariantId = toIdString(item.variantId || '');
+      const requestedProductId = normalizeId(item.productId);
+      const requestedVariantId = normalizeId(item.variantId || '');
       const requestedVariantName = item.variantName || null;
 
       // Get variant info if provided
       let variantName = requestedVariantName;
       if (!variantName && requestedVariantId && product.hasVariants && Array.isArray(product.variants)) {
         const variant = product.variants.find(v => {
-          const variantId = toIdString(v._id);
-          const variantSku = toIdString(v.sku);
+          const variantId = normalizeId(v._id);
+          const variantSku = normalizeId(v.sku);
           return variantId === requestedVariantId || (variantSku && variantSku === requestedVariantId);
         });
         if (variant) {
@@ -71,8 +100,8 @@ const createSalesOrder = async (req, res) => {
       
       for (const warehouse of warehouses) {
         const stockItem = warehouse.currentStock.find(stock => {
-          const stockProductId = toIdString(stock.productId?._id || stock.productId);
-          const stockVariantId = toIdString(stock.variantId || stock.variantDetails?._id || stock.variantDetails?.sku || '');
+          const stockProductId = normalizeId(stock.productId?._id || stock.productId);
+          const stockVariantId = normalizeId(stock.variantId || stock.variantDetails?._id || stock.variantDetails?.sku || '');
 
           const productMatches = stockProductId === requestedProductId;
           const variantMatches = requestedVariantId
