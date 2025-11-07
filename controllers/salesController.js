@@ -37,10 +37,29 @@ const createSalesOrder = async (req, res) => {
         return res.status(404).json({ error: `Product with ID ${item.productId} not found` });
       }
 
+      const toIdString = (value) => {
+        if (!value) return '';
+        if (typeof value === 'string') return value;
+        if (typeof value === 'object') {
+          if (value._id) return toIdString(value._id);
+          if (value.id) return toIdString(value.id);
+        }
+        if (typeof value === 'number') return value.toString();
+        return value.toString ? value.toString() : String(value);
+      };
+
+      const requestedProductId = toIdString(item.productId);
+      const requestedVariantId = toIdString(item.variantId || '');
+      const requestedVariantName = item.variantName || null;
+
       // Get variant info if provided
-      let variantName = null;
-      if (item.variantId && product.hasVariants && product.variants) {
-        const variant = product.variants.find(v => (v._id?.toString() === item.variantId || v.sku === item.variantId));
+      let variantName = requestedVariantName;
+      if (!variantName && requestedVariantId && product.hasVariants && Array.isArray(product.variants)) {
+        const variant = product.variants.find(v => {
+          const variantId = toIdString(v._id);
+          const variantSku = toIdString(v.sku);
+          return variantId === requestedVariantId || (variantSku && variantSku === requestedVariantId);
+        });
         if (variant) {
           variantName = variant.name;
         }
@@ -51,13 +70,22 @@ const createSalesOrder = async (req, res) => {
       let totalAvailableStock = 0;
       
       for (const warehouse of warehouses) {
-      const stockItem = warehouse.currentStock.find(stock => 
-          stock.productId.toString() === item.productId &&
-          (stock.variantId || null) === (item.variantId || null)
-      );
+        const stockItem = warehouse.currentStock.find(stock => {
+          const stockProductId = toIdString(stock.productId?._id || stock.productId);
+          const stockVariantId = toIdString(stock.variantId || stock.variantDetails?._id || stock.variantDetails?.sku || '');
+
+          const productMatches = stockProductId === requestedProductId;
+          const variantMatches = requestedVariantId
+            ? stockVariantId === requestedVariantId
+            : !stockVariantId;
+
+          return productMatches && variantMatches;
+        });
         if (stockItem) {
           const reserved = stockItem.reservedQuantity || 0;
-          const available = (stockItem.quantity || 0) - reserved;
+          const delivered = stockItem.deliveredQuantity || 0;
+          const confirmedDelivered = stockItem.confirmedDeliveredQuantity || 0;
+          const available = (stockItem.quantity || 0) - reserved - delivered - confirmedDelivered;
           totalAvailableStock += Math.max(0, available);
         }
       }
