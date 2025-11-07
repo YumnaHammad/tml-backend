@@ -94,6 +94,8 @@ const createSalesOrder = async (req, res) => {
         }
       }
 
+      const normalizedVariantName = (variantName || '').toString().toLowerCase().trim();
+
       // Check stock availability across all warehouses (MATCH BY PRODUCT + VARIANT)
       const warehouses = await Warehouse.find({ isActive: true });
       let totalAvailableStock = 0;
@@ -102,11 +104,16 @@ const createSalesOrder = async (req, res) => {
         const stockItem = warehouse.currentStock.find(stock => {
           const stockProductId = normalizeId(stock.productId?._id || stock.productId);
           const stockVariantId = normalizeId(stock.variantId || stock.variantDetails?._id || stock.variantDetails?.sku || '');
+          const stockVariantName = (stock.variantDetails?.name || stock.variantName || '').toString().toLowerCase().trim();
 
           const productMatches = stockProductId === requestedProductId;
           const variantMatches = requestedVariantId
-            ? stockVariantId === requestedVariantId
-            : !stockVariantId;
+            ? (stockVariantId === requestedVariantId || (
+                normalizedVariantName && stockVariantName && stockVariantName === normalizedVariantName
+              ))
+            : (!stockVariantId || (
+                normalizedVariantName && stockVariantName && stockVariantName === normalizedVariantName
+              ));
 
           return productMatches && variantMatches;
         });
