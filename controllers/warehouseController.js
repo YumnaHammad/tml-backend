@@ -20,6 +20,14 @@ const getAllWarehouses = async (req, res) => {
         const normalizeId = (value) => {
           if (!value) return '';
           if (typeof value === 'string') return value;
+          if (typeof value === 'object') {
+            if (value._id) {
+              return normalizeId(value._id);
+            }
+            if (value.id) {
+              return normalizeId(value.id);
+            }
+          }
           if (value.toString) return value.toString();
           return String(value);
         };
@@ -92,6 +100,14 @@ const getWarehouseById = async (req, res) => {
       const normalizeId = (value) => {
         if (!value) return '';
         if (typeof value === 'string') return value;
+        if (typeof value === 'object') {
+          if (value._id) {
+            return normalizeId(value._id);
+          }
+          if (value.id) {
+            return normalizeId(value.id);
+          }
+        }
         if (value.toString) return value.toString();
         return String(value);
       };
