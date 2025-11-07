@@ -16,18 +16,34 @@ const getAllWarehouses = async (req, res) => {
       const enrichedStock = warehouse.currentStock.map(stockItem => {
         const stockObj = stockItem.toObject ? stockItem.toObject() : stockItem;
         const product = stockObj.productId;
-        
+
+        const normalizeId = (value) => {
+          if (!value) return '';
+          if (typeof value === 'string') return value;
+          if (value.toString) return value.toString();
+          return String(value);
+        };
+
+        const stockVariantId = normalizeId(stockObj.variantId);
+        const stockVariantSku = normalizeId(stockObj.variantSku || stockObj.sku);
+
         // If product has variants and this stock item has a variantId, find the variant details
-        if (product && product.hasVariants && product.variants && stockObj.variantId) {
-          const variant = product.variants.find(v => 
-            (v._id && v._id.toString() === stockObj.variantId) || 
-            (v.sku === stockObj.variantId) ||
-            (v.sku && stockObj.variantId && v.sku.toString() === stockObj.variantId.toString())
-          );
-          
+        if (product && product.hasVariants && product.variants && (stockVariantId || stockVariantSku)) {
+          const variant = product.variants.find(v => {
+            const variantId = normalizeId(v._id);
+            const variantSku = normalizeId(v.sku);
+            return (
+              (variantId && stockVariantId && variantId === stockVariantId) ||
+              (variantSku && stockVariantId && variantSku === stockVariantId) ||
+              (variantId && stockVariantSku && variantId === stockVariantSku) ||
+              (variantSku && stockVariantSku && variantSku === stockVariantSku)
+            );
+          });
+
           if (variant) {
             return {
               ...stockObj,
+              variantId: normalizeId(variant._id) || stockVariantId,
               variantDetails: {
                 name: variant.name,
                 sku: variant.sku,
@@ -37,7 +53,7 @@ const getAllWarehouses = async (req, res) => {
             };
           }
         }
-        
+
         return stockObj;
       });
 
@@ -72,18 +88,34 @@ const getWarehouseById = async (req, res) => {
     const enrichedStock = warehouse.currentStock.map(stockItem => {
       const stockObj = stockItem.toObject ? stockItem.toObject() : stockItem;
       const product = stockObj.productId;
-      
+
+      const normalizeId = (value) => {
+        if (!value) return '';
+        if (typeof value === 'string') return value;
+        if (value.toString) return value.toString();
+        return String(value);
+      };
+
+      const stockVariantId = normalizeId(stockObj.variantId);
+      const stockVariantSku = normalizeId(stockObj.variantSku || stockObj.sku);
+
       // If product has variants and this stock item has a variantId, find the variant details
-      if (product && product.hasVariants && product.variants && stockObj.variantId) {
-        const variant = product.variants.find(v => 
-          (v._id && v._id.toString() === stockObj.variantId) || 
-          (v.sku === stockObj.variantId) ||
-          (v.sku && stockObj.variantId && v.sku.toString() === stockObj.variantId.toString())
-        );
-        
+      if (product && product.hasVariants && product.variants && (stockVariantId || stockVariantSku)) {
+        const variant = product.variants.find(v => {
+          const variantId = normalizeId(v._id);
+          const variantSku = normalizeId(v.sku);
+          return (
+            (variantId && stockVariantId && variantId === stockVariantId) ||
+            (variantSku && stockVariantId && variantSku === stockVariantId) ||
+            (variantId && stockVariantSku && variantId === stockVariantSku) ||
+            (variantSku && stockVariantSku && variantSku === stockVariantSku)
+          );
+        });
+
         if (variant) {
           return {
             ...stockObj,
+            variantId: normalizeId(variant._id) || stockVariantId,
             variantDetails: {
               name: variant.name,
               sku: variant.sku,
@@ -93,7 +125,7 @@ const getWarehouseById = async (req, res) => {
           };
         }
       }
-      
+
       return stockObj;
     });
 

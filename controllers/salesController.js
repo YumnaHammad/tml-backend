@@ -314,7 +314,7 @@ const getAllSalesOrders = async (req, res) => {
 
     // Determine sort order - default to newest first (orderDate descending)
     let sortOrder = { orderDate: -1 }; // Default: newest first
-    
+
     const salesOrders = await SalesOrder.find(query)
       .populate('items.productId', 'name sku')
       .populate('createdBy', 'firstName lastName')
