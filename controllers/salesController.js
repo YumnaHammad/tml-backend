@@ -58,6 +58,21 @@ const parseSearchDate = (value) => {
     return direct;
   }
 
+  const dateParts = trimmed.split(/[\/\-]/).filter(Boolean);
+
+  // Handle DD/MM (assume current year)
+  if (dateParts.length === 2) {
+    const [part1, part2] = dateParts.map(part => parseInt(part, 10));
+    if (!Number.isNaN(part1) && !Number.isNaN(part2)) {
+      const now = new Date();
+      const assumedYear = now.getFullYear();
+      const constructed = new Date(assumedYear, part2 - 1, part1);
+      if (!Number.isNaN(constructed.getTime())) {
+        return constructed;
+      }
+    }
+  }
+
   // Try DD/MM/YYYY or DD-MM-YYYY format
   const match = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if (match) {
