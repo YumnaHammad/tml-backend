@@ -47,50 +47,6 @@ const parseDateValue = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const parseSearchDate = (value) => {
-  if (!value || typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  // Try native Date parsing first
-  const direct = new Date(trimmed);
-  if (!Number.isNaN(direct.getTime())) {
-    return direct;
-  }
-
-  const dateParts = trimmed.split(/[\/\-]/).filter(Boolean);
-
-  // Handle DD/MM (assume current year)
-  if (dateParts.length === 2) {
-    const [part1, part2] = dateParts.map(part => parseInt(part, 10));
-    if (!Number.isNaN(part1) && !Number.isNaN(part2)) {
-      const now = new Date();
-      const assumedYear = now.getFullYear();
-      const constructed = new Date(assumedYear, part2 - 1, part1);
-      if (!Number.isNaN(constructed.getTime())) {
-        return constructed;
-      }
-    }
-  }
-
-  // Try DD/MM/YYYY or DD-MM-YYYY format
-  const match = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if (match) {
-    const day = parseInt(match[1], 10);
-    const month = parseInt(match[2], 10) - 1;
-    let year = parseInt(match[3], 10);
-    if (year < 100) {
-      year += year >= 70 ? 1900 : 2000; // handle YY formats
-    }
-    const constructed = new Date(year, month, day);
-    if (!Number.isNaN(constructed.getTime())) {
-      return constructed;
-    }
-  }
-
-  return null;
-};
-
 // Create a new sales order
 const createSalesOrder = async (req, res) => {
   try {
@@ -442,19 +398,6 @@ const getAllSalesOrders = async (req, res) => {
       query.$or = searchConditions;
 
       // Allow searching by sale date (orderDate/timestamp/createdAt)
-      const parsedSearchDate = parseSearchDate(trimmedSearch);
-      if (parsedSearchDate) {
-        const startOfDay = new Date(parsedSearchDate.getFullYear(), parsedSearchDate.getMonth(), parsedSearchDate.getDate());
-        const endOfDay = new Date(parsedSearchDate.getFullYear(), parsedSearchDate.getMonth(), parsedSearchDate.getDate() + 1);
-        query.$and = query.$and || [];
-        query.$and.push({
-          $or: [
-            { orderDate: { $gte: startOfDay, $lt: endOfDay } },
-            { timestamp: { $gte: startOfDay, $lt: endOfDay } },
-            { createdAt: { $gte: startOfDay, $lt: endOfDay } }
-          ]
-        });
-      }
     } else if (timeFilterConditions) {
       query.$or = timeFilterConditions;
     }
