@@ -41,10 +41,45 @@ const normalizeId = (value) => {
   return String(current);
 };
 
+const parseDateValue = (value) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const parseSearchDate = (value) => {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  // Try native Date parsing first
+  const direct = new Date(trimmed);
+  if (!Number.isNaN(direct.getTime())) {
+    return direct;
+  }
+
+  // Try DD/MM/YYYY or DD-MM-YYYY format
+  const match = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1;
+    let year = parseInt(match[3], 10);
+    if (year < 100) {
+      year += year >= 70 ? 1900 : 2000; // handle YY formats
+    }
+    const constructed = new Date(year, month, day);
+    if (!Number.isNaN(constructed.getTime())) {
+      return constructed;
+    }
+  }
+
+  return null;
+};
+
 // Create a new sales order
 const createSalesOrder = async (req, res) => {
   try {
-    const { customerInfo, items, deliveryAddress, expectedDeliveryDate, notes, agentName, timestamp } = req.body;
+    const { customerInfo, items, deliveryAddress, expectedDeliveryDate, notes, agentName, timestamp, orderDate } = req.body;
 
     // Validate required fields
     if (!customerInfo?.address?.city) {
@@ -213,6 +248,9 @@ const createSalesOrder = async (req, res) => {
         }
         
         // Try to create with this order number
+        const parsedTimestamp = parseDateValue(timestamp) || new Date();
+        const parsedOrderDate = parseDateValue(orderDate) || parsedTimestamp;
+
         salesOrder = new SalesOrder({
           orderNumber,
           customerInfo,
@@ -222,7 +260,8 @@ const createSalesOrder = async (req, res) => {
           expectedDeliveryDate,
           notes,
           agentName: agentName || null,
-          timestamp: timestamp ? new Date(timestamp) : new Date(),
+          timestamp: parsedTimestamp,
+          orderDate: parsedOrderDate,
           createdBy: userId
         });
 
@@ -350,15 +389,59 @@ const getAllSalesOrders = async (req, res) => {
       }
     }
 
+    let timeFilterConditions = null;
+    if (query.$or && query.$or.length > 0) {
+      timeFilterConditions = query.$or;
+      delete query.$or;
+    }
+
     // Add search functionality for phone number, CN number, and agent name
     const isSearching = search && search.trim();
     if (isSearching) {
-      const searchRegex = new RegExp(search.trim(), 'i'); // Case-insensitive search
-      query.$or = [
+      const trimmedSearch = search.trim();
+      const searchRegex = new RegExp(trimmedSearch, 'i'); // Case-insensitive search
+      const searchConditions = [
         { 'customerInfo.phone': searchRegex },
         { 'customerInfo.cnNumber': searchRegex },
-        { 'agentName': searchRegex }
+        { agentName: searchRegex },
+        { orderNumber: searchRegex },
+        { notes: searchRegex },
+        { 'items.variantName': searchRegex }
       ];
+
+      // Include product name / SKU matches
+      const matchingProducts = await Product.find(
+        {
+          $or: [
+            { name: searchRegex },
+            { sku: searchRegex }
+          ]
+        },
+        { _id: 1 }
+      );
+      if (matchingProducts.length > 0) {
+        const productIds = matchingProducts.map((product) => product._id);
+        searchConditions.push({ 'items.productId': { $in: productIds } });
+      }
+
+      query.$or = searchConditions;
+
+      // Allow searching by sale date (orderDate/timestamp/createdAt)
+      const parsedSearchDate = parseSearchDate(trimmedSearch);
+      if (parsedSearchDate) {
+        const startOfDay = new Date(parsedSearchDate.getFullYear(), parsedSearchDate.getMonth(), parsedSearchDate.getDate());
+        const endOfDay = new Date(parsedSearchDate.getFullYear(), parsedSearchDate.getMonth(), parsedSearchDate.getDate() + 1);
+        query.$and = query.$and || [];
+        query.$and.push({
+          $or: [
+            { orderDate: { $gte: startOfDay, $lt: endOfDay } },
+            { timestamp: { $gte: startOfDay, $lt: endOfDay } },
+            { createdAt: { $gte: startOfDay, $lt: endOfDay } }
+          ]
+        });
+      }
+    } else if (timeFilterConditions) {
+      query.$or = timeFilterConditions;
     }
 
     // Convert limit and page to numbers, with safety limits
@@ -441,6 +524,18 @@ const updateSalesOrder = async (req, res) => {
     if (updateData.deliveryAddress) salesOrder.deliveryAddress = { ...salesOrder.deliveryAddress, ...updateData.deliveryAddress };
     if (updateData.agentName !== undefined) salesOrder.agentName = updateData.agentName;
     if (updateData.notes !== undefined) salesOrder.notes = updateData.notes;
+    if (updateData.orderDate) {
+      const parsedOrderDate = parseDateValue(updateData.orderDate);
+      if (parsedOrderDate) {
+        salesOrder.orderDate = parsedOrderDate;
+      }
+    }
+    if (updateData.timestamp) {
+      const parsedTimestamp = parseDateValue(updateData.timestamp);
+      if (parsedTimestamp) {
+        salesOrder.timestamp = parsedTimestamp;
+      }
+    }
     if (updateData.items) {
       salesOrder.items = updateData.items.map(item => ({
         productId: item.productId,
