@@ -31,6 +31,7 @@ const reportRoutes = require('./routes/reports');
 const cityReportRoutes = require('./routes/cityReports');
 const expectedReturnRoutes = require('./routes/expectedReturns');
 const customerRoutes = require('./routes/customers');
+const postExRoutes = require('./routes/postEx');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -197,6 +198,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/city-reports', cityReportRoutes);
 app.use('/api/expected-returns', expectedReturnRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api/postex', postExRoutes);
 
 // --------------------
 // 🩺 Health Check Route
