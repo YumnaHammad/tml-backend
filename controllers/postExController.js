@@ -234,27 +234,14 @@ const fetchPostExOrdersFromAPI = async (req, res) => {
 
     console.log("Fetching orders from PostEx API with dates:", { startDate, endDate });
 
-    let response;
-
-    // Try GET first with query parameters
-    try {
-      const params = new URLSearchParams({
-        startDate: startDate,
-        endDate: endDate
-      });
-      response = await postExApi.get(`/v1/get-all-order?${params.toString()}`, config);
-      console.log("Success with GET method");
-    } catch (getError) {
-      console.log("GET failed, trying POST...", getError.response?.status, getError.response?.data);
-      
-      // If GET fails, try POST with dates in request body
-      const requestBody = {
-        startDate: startDate,
-        endDate: endDate
-      };
-      response = await postExApi.post("/v1/get-all-order", requestBody, config);
-      console.log("Success with POST method");
-    }
+    // PostEx API only supports GET method, not POST
+    const params = new URLSearchParams({
+      startDate: startDate,
+      endDate: endDate
+    });
+    
+    const response = await postExApi.get(`/v1/get-all-order?${params.toString()}`, config);
+    console.log("Successfully fetched orders from PostEx API");
 
     // Handle different response formats
     let ordersData = [];
