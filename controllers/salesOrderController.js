@@ -294,6 +294,7 @@ const submitSalesOrder = async (req, res) => {
   }
 };
 
+
 // Generate PDF receipt for sales order
 const generateSalesReceipt = async (salesOrder) => {
   const doc = new PDFDocument();
