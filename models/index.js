@@ -16,6 +16,7 @@ const StockMovement = require('./StockMovement');
 const StockAlert = require('./StockAlert');
 const Report = require('./Report');
 const AuditLog = require('./AuditLog');
+const PostExOrder = require('./PostExOrder');
 
 module.exports = {
   User,
@@ -32,5 +33,6 @@ module.exports = {
   StockMovement,
   StockAlert,
   Report,
-  AuditLog
+  AuditLog,
+  PostExOrder
 };
