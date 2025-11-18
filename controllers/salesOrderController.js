@@ -180,7 +180,27 @@ const updateSalesOrder = async (req, res) => {
     res.status(500).json({ error: "Failed to update sales order" });
   }
 };
+const updatePostExStatus = async (req, res) => {
+  const { id, postExStatus } = req.body;
+  console.log("PostEx status update request:", { id, postExStatus });
+  try {
+    const salesOrder = await SalesOrder.findById(id);
+    if (!salesOrder) {
+      return res.status(404).json({ error: "Sales order not found" });
+    }
 
+    salesOrder.proceededToPostEx = postExStatus;
+    await salesOrder.save();
+
+    res.json({
+      message: "PostEx status updated successfully",
+      salesOrder,
+    });
+  } catch (error) {
+    console.error("Error updating postEx status:", error);
+    res.status(500).json({ error: "Failed to update postEx status" });
+  }
+};
 // Submit sales order
 const submitSalesOrder = async (req, res) => {
   const { id } = req.params;
@@ -334,5 +354,6 @@ module.exports = {
   getAllSalesOrders,
   updateSalesOrder,
   submitSalesOrder,
-  getSaleOrderById
+  getSaleOrderById,
+  updatePostExStatus,
 };

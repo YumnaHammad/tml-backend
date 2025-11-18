@@ -6,6 +6,7 @@ const {
   updateSalesOrder,
   submitSalesOrder,
   getSaleOrderById,
+  updatePostExStatus,
 } = require("../controllers/salesOrderController");
 
 // @route   POST /api/sales-orders
@@ -18,6 +19,7 @@ router.post("/", createSalesOrder);
 // @access  Public (for testing)
 router.get("/:id", getSaleOrderById);
 router.get("/", getAllSalesOrders);
+router.post("/update-postex-status", updatePostExStatus);
 
 // @route   PUT /api/sales-orders/:id
 // @desc    Update draft sales order
