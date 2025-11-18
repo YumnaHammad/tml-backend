@@ -237,32 +237,49 @@ const fetchPostExOrdersFromAPI = async (req, res) => {
     // PostEx API only supports GET method, not POST
     // orderStatusId: 0 or null typically means all orders, or specific status IDs
     // If not provided, default to 0 to get all orders
+    // Note: orderStatusId should be an integer, not a string
+    const statusId = orderStatusId ? parseInt(orderStatusId) : 0;
+    
     const params = new URLSearchParams({
       startDate: startDate,
       endDate: endDate,
-      orderStatusId: orderStatusId || '0' // Default to 0 for all orders if not specified
+      orderStatusId: statusId.toString() // Convert to string for URLSearchParams
     });
     
+    console.log("PostEx API Request URL:", `/v1/get-all-order?${params.toString()}`);
     const response = await postExApi.get(`/v1/get-all-order?${params.toString()}`, config);
-    console.log("Successfully fetched orders from PostEx API");
+    console.log("PostEx API Response Status:", response.status);
+    console.log("PostEx API Response Data Type:", typeof response.data);
+    console.log("PostEx API Response Data:", JSON.stringify(response.data).substring(0, 500));
 
     // Handle different response formats
     let ordersData = [];
     if (response.data && Array.isArray(response.data)) {
       ordersData = response.data;
+      console.log("Found orders in response.data array, count:", ordersData.length);
     } else if (response.data?.data && Array.isArray(response.data.data)) {
       ordersData = response.data.data;
+      console.log("Found orders in response.data.data array, count:", ordersData.length);
     } else if (response.data?.orders && Array.isArray(response.data.orders)) {
       ordersData = response.data.orders;
+      console.log("Found orders in response.data.orders array, count:", ordersData.length);
     } else if (response.data?.result && Array.isArray(response.data.result)) {
       ordersData = response.data.result;
+      console.log("Found orders in response.data.result array, count:", ordersData.length);
+    } else {
+      console.log("No orders array found in response. Response structure:", Object.keys(response.data || {}));
+      // Still return success with empty array
+      ordersData = [];
     }
 
+    console.log("Returning orders to frontend, count:", ordersData.length);
     res.json({
       success: true,
       orders: ordersData,
       total: ordersData.length,
-      message: "Orders fetched successfully from PostEx API"
+      message: ordersData.length > 0 
+        ? `Orders fetched successfully from PostEx API (${ordersData.length} orders)`
+        : "No orders found for the specified date range"
     });
   } catch (error) {
     console.error("Error fetching PostEx orders from API:", error);
