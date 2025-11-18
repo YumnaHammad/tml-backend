@@ -202,7 +202,7 @@ const deletePostExOrder = async (req, res) => {
 // Fetch orders from PostEx API
 const fetchPostExOrdersFromAPI = async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, orderStatusId } = req.query;
 
     // Validate required parameters
     if (!startDate || !endDate) {
@@ -232,12 +232,15 @@ const fetchPostExOrdersFromAPI = async (req, res) => {
       },
     };
 
-    console.log("Fetching orders from PostEx API with dates:", { startDate, endDate });
+    console.log("Fetching orders from PostEx API with dates:", { startDate, endDate, orderStatusId });
 
     // PostEx API only supports GET method, not POST
+    // orderStatusId: 0 or null typically means all orders, or specific status IDs
+    // If not provided, default to 0 to get all orders
     const params = new URLSearchParams({
       startDate: startDate,
-      endDate: endDate
+      endDate: endDate,
+      orderStatusId: orderStatusId || '0' // Default to 0 for all orders if not specified
     });
     
     const response = await postExApi.get(`/v1/get-all-order?${params.toString()}`, config);
