@@ -481,7 +481,15 @@ const getAllSalesOrders = async (req, res) => {
         searchConditions.push({ "items.productId": { $in: productIds } });
       }
 
-      query.$or = searchConditions;
+      // If both search and time filter are present, combine them with $and
+      if (timeFilterConditions && timeFilterConditions.length > 0) {
+        query.$and = [
+          { $or: searchConditions },
+          { $or: timeFilterConditions }
+        ];
+      } else {
+        query.$or = searchConditions;
+      }
 
       // Allow searching by sale date (orderDate/timestamp/createdAt)
     } else if (timeFilterConditions) {
