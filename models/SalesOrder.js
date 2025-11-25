@@ -7,6 +7,10 @@ const salesOrderSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    trackingNumber: {
+      type: String,
+      default: "",
+    },
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Customer",
@@ -18,7 +22,12 @@ const salesOrderSchema = new mongoose.Schema(
       },
       cnNumber: {
         type: String,
-        default: "",
+        validate: {
+          validator: function (v) {
+            return !v || /^[A-Za-z0-9]{14}$/.test(v);
+          },
+          message: "CN number must be exactly 14 alphanumeric characters",
+        },
       },
       phone: {
         type: String,
