@@ -422,37 +422,25 @@ const getAllSalesOrders = async (req, res) => {
 
     if (status) query.status = status;
     if (startDate || endDate) {
-      // Use orderDate, timestamp, or createdAt for date filtering
-      query.$or = [];
+      // Filter STRICTLY by orderDate (actual sales date) ONLY
+      // Do NOT use timestamp or createdAt - they are not sales dates
       if (startDate && endDate) {
         const start = new Date(startDate);
         const end = new Date(endDate);
-        query.$or = [
-          { orderDate: { $gte: start, $lte: end } },
-          { timestamp: { $gte: start, $lte: end } },
-          { createdAt: { $gte: start, $lte: end } },
-        ];
+        // Ensure dates are properly set (handle timezone issues)
+        start.setHours(0, 0, 0, 0);
+        end.setHours(23, 59, 59, 999);
+        // Only filter by orderDate - the actual sales date
+        query.orderDate = { $gte: start, $lte: end };
       } else if (startDate) {
         const start = new Date(startDate);
-        query.$or = [
-          { orderDate: { $gte: start } },
-          { timestamp: { $gte: start } },
-          { createdAt: { $gte: start } },
-        ];
+        start.setHours(0, 0, 0, 0);
+        query.orderDate = { $gte: start };
       } else if (endDate) {
         const end = new Date(endDate);
-        query.$or = [
-          { orderDate: { $lte: end } },
-          { timestamp: { $lte: end } },
-          { createdAt: { $lte: end } },
-        ];
+        end.setHours(23, 59, 59, 999);
+        query.orderDate = { $lte: end };
       }
-    }
-
-    let timeFilterConditions = null;
-    if (query.$or && query.$or.length > 0) {
-      timeFilterConditions = query.$or;
-      delete query.$or;
     }
 
     // Add search functionality for phone number, CN number, and agent name
@@ -481,20 +469,18 @@ const getAllSalesOrders = async (req, res) => {
         searchConditions.push({ "items.productId": { $in: productIds } });
       }
 
-      // If both search and time filter are present, combine them with $and
-      if (timeFilterConditions && timeFilterConditions.length > 0) {
+      // If both search and date filter (orderDate) are present, combine them with $and
+      if (query.orderDate) {
         query.$and = [
           { $or: searchConditions },
-          { $or: timeFilterConditions }
+          { orderDate: query.orderDate }
         ];
+        delete query.orderDate; // Remove from root level since it's now in $and
       } else {
         query.$or = searchConditions;
       }
-
-      // Allow searching by sale date (orderDate/timestamp/createdAt)
-    } else if (timeFilterConditions) {
-      query.$or = timeFilterConditions;
     }
+    // If no search but date filter exists, query.orderDate is already set above
 
     // Convert limit and page to numbers, with safety limits
     // When searching OR when limit is high (All Time), allow much higher limit to show all results
