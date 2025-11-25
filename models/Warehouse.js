@@ -60,6 +60,36 @@ const warehouseSchema = new mongoose.Schema({
       default: 0,
       min: 0
     },
+    // PostEx integration fields
+    postExOrderRef: {
+      type: String,
+      default: null,
+      index: true
+    },
+    postExStatus: {
+      type: String,
+      enum: [
+        'Unbooked',
+        'Booked',
+        'PostEx WareHouse',
+        'Out For Delivery',
+        'Delivered',
+        'Returned',
+        'Un-Assigned By Me',
+        'Expired',
+        'Delivery Under Review',
+        'Picked By PostEx',
+        'Out For Return',
+        'Attempted',
+        'En-Route to PostEx warehouse',
+        null
+      ],
+      default: null
+    },
+    postExStatusId: {
+      type: Number,
+      default: null
+    },
     tags: [{
       type: String,
       enum: ['returned', 'damaged', 'expired']
