@@ -6,7 +6,6 @@ const {
   User,
   Dispatch,
   Invoice,
-  Warehouse,
 } = require("../models");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
@@ -191,51 +190,6 @@ const updatePostExStatus = async (req, res) => {
 
     salesOrder.proceededToPostEx = postExStatus;
     salesOrder.trackingNumber = trackingNumber;
-    const items = salesOrder.items;
-
-    const warehouses = await Warehouse.find({ isActive: true });
-    console.log("whare house is", warehouses);
-
-    for (const item of items) {
-      const { productId, variantId, variantName, quantity } = item;
-
-      let itemProcessed = false;
-
-      // Try to find and update stock in each warehouse
-      for (const warehouse of warehouses) {
-        const stockItem = warehouse.currentStock.find(
-          (stock) =>
-            stock.productId.toString() === productId.toString() &&
-            (variantId ? stock.variantId === variantId : !stock.variantId)
-        );
-
-        if (stockItem && stockItem.quantity >= quantity) {
-          // Deduct the quantity from warehouse stock
-          stockItem.quantity -= quantity;
-
-          // Update delivered quantity (you can modify this based on your business logic)
-          stockItem.deliveredQuantity =
-            (stockItem.deliveredQuantity || 0) + quantity;
-
-          // Add PostEx tracking information to warehouse stock item
-          stockItem.postExOrderRef = trackingNumber;
-          stockItem.postExStatus = postExStatus;
-
-          await warehouse.save();
-          itemProcessed = true;
-          break; // Break out of warehouse loop once item is processed
-        }
-      }
-
-      if (!itemProcessed) {
-        console.warn(
-          `Insufficient stock for product ${productId}${
-            variantId ? ` (variant: ${variantId})` : ""
-          } in any warehouse`
-        );
-        // You might want to handle this case - maybe throw an error or log it
-      }
-    }
 
     await salesOrder.save();
 
