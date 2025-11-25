@@ -189,7 +189,7 @@ const updatePostExStatus = async (req, res) => {
     }
 
     salesOrder.proceededToPostEx = postExStatus;
-    salesOrder.cnNumber = trackingNumber;
+    salesOrder.trackingNumber = trackingNumber;
 
     await salesOrder.save();
 
