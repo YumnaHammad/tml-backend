@@ -18,12 +18,7 @@ const salesOrderSchema = new mongoose.Schema(
       },
       cnNumber: {
         type: String,
-        validate: {
-          validator: function (v) {
-            return !v || /^[A-Za-z0-9]{14}$/.test(v);
-          },
-          message: "CN number must be exactly 14 alphanumeric characters",
-        },
+        default: "",
       },
       phone: {
         type: String,
