@@ -761,7 +761,7 @@ const updateSalesOrderStatus = async (req, res) => {
               const unbookQty = Math.min(availableQty, quantityToUnbook);
 
               // Decrease main quantity and increase Unbooked
-              stockItem.quantity -= unbookQty;
+              // stockItem.quantity -= unbookQty;
 
               if (!stockItem.Unbooked) {
                 stockItem.Unbooked = 0;
