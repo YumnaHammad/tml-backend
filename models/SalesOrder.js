@@ -91,6 +91,7 @@ const salesOrderSchema = new mongoose.Schema(
       type: String,
       enum: [
         "pending",
+        "Booked",
         "confirmed",
         "dispatch",
         "dispatched",
