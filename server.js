@@ -228,6 +228,7 @@ app.post("/webhook/postex-updates", (req, res) => {
 
     // Process the webhook data
     const webhookData = req.body;
+console.log("webhook data is:", webhookData);
 
     // Handle different types of status updates
     if (webhookData.tracking_number || webhookData.status) {
