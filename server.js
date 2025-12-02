@@ -1089,7 +1089,6 @@ app.post("/webhook/postex-updates", async (req, res) => {
                 const returnQty = Math.min(fieldQty, quantityToReturn);
 
                 stockItem[field] -= returnQty;
-                stockItem.quantity += returnQty;
                 quantityToReturn -= returnQty;
 
                 await warehouse.save();
