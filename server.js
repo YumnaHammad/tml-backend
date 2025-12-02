@@ -220,7 +220,7 @@ app.use("/api/customers", customerRoutes);
 app.use("/api/postex", postExRoutes);
 
 // route  for postEX  webhook
-app.post("/webhook/postex-updates", (req, res) => {
+app.post("/webhook/postex-updates", async (req, res) => {
   try {
     // Log all incoming headers for debugging
     console.log("Received webhook with headers:", req.headers);
@@ -228,17 +228,402 @@ app.post("/webhook/postex-updates", (req, res) => {
 
     // Process the webhook data
     const webhookData = req.body;
-console.log("webhook data is:", webhookData);
+    const {
+      trackingNumber,
+      orderReferenceNumber,
+      orderStatus,
+      statusUpdateDatetime,
+      returnRequested,
+      lastAttemptReason,
+    } = webhookData;
 
-    // Handle different types of status updates
-    if (webhookData.tracking_number || webhookData.status) {
-      processStatusUpdate(webhookData);
+    // Validate required fields
+    if (!trackingNumber || !orderStatus) {
+      console.warn("Missing required fields in webhook:", webhookData);
+      return res.status(400).json({
+        status: "error",
+        message: "Missing required fields: trackingNumber or orderStatus",
+      });
+    }
+
+    // Import required models
+    const { SalesOrder, Warehouse, StockMovement } = require("./models");
+    const { createAuditLog } = require("./middleware/audit");
+
+    // Map PostEx orderStatus to internal status values
+    const statusMap = {
+      Delivered: "Delivered",
+      "Out For Delivery": "OutForDelivery",
+      Booked: "Booked",
+      Unbooked: "Unbooked",
+      "Picked By PostEx": "PickedByPostEx",
+      "En-Route to PostEx warehouse": "EnRouteToPostExwarehouse",
+      "PostEx WareHouse": "PostExWareHouse",
+      Returned: "Returned",
+      "Out For Return": "OutForReturn",
+      Attempted: "Attempted",
+      "Delivery Under Review": "DeliveryUnderReview",
+      Expired: "Expired",
+      "Un-Assigned By Me": "UnAssignedByMe",
+      Cancelled: "cancelled",
+    };
+
+    const internalStatus = statusMap[orderStatus] || orderStatus;
+
+    // Find sales order by trackingNumber
+    const salesOrder = await SalesOrder.findOne({
+      trackingNumber: trackingNumber,
+    }).populate("items.productId");
+
+    if (!salesOrder) {
+      console.error("Sales order not found for trackingNumber:", trackingNumber);
+      return res.status(404).json({
+        status: "error",
+        message: `Sales order not found for tracking number: ${trackingNumber}`,
+      });
+    }
+
+    const oldStatus = salesOrder.status;
+    let returnWarehouse = null;
+
+    // Handle UNBOOKED status - move stock to Unbooked column
+    if (internalStatus === "Unbooked") {
+      console.log("Processing Unbooked - moving stock to Unbooked column");
+
+      const warehouses = await Warehouse.find({ isActive: true });
+
+      for (const item of salesOrder.items) {
+        const itemProductId =
+          item.productId && item.productId._id
+            ? item.productId._id.toString()
+            : item.productId.toString();
+        let quantityToUnbook = item.quantity;
+
+        for (const warehouse of warehouses) {
+          if (quantityToUnbook <= 0) break;
+
+          const stockItem = warehouse.currentStock.find(
+            (stock) =>
+              stock.productId.toString() === itemProductId &&
+              (stock.variantId || null) === (item.variantId || null)
+          );
+
+          if (stockItem) {
+            const availableQty = stockItem.quantity || 0;
+            if (availableQty > 0) {
+              const unbookQty = Math.min(availableQty, quantityToUnbook);
+
+              if (!stockItem.Unbooked) {
+                stockItem.Unbooked = 0;
+              }
+              stockItem.Unbooked += unbookQty;
+
+              quantityToUnbook -= unbookQty;
+
+              await warehouse.save();
+
+              const stockMovement = new StockMovement({
+                productId: item.productId,
+                warehouseId: warehouse._id,
+                movementType: "unbooked",
+                quantity: unbookQty,
+                previousQuantity: stockItem.quantity + unbookQty,
+                newQuantity: stockItem.quantity,
+                referenceType: "sales_order",
+                referenceId: salesOrder._id,
+                notes: `Stock moved to Unbooked for order ${salesOrder.orderNumber}${item.variantName ? " - " + item.variantName : ""} (PostEx webhook)`,
+                createdBy: salesOrder.createdBy || null,
+              });
+              await stockMovement.save();
+            }
+          }
+        }
+      }
+    }
+
+    // Handle BOOKED status - move from Unbooked to Booked
+    if (internalStatus === "Booked") {
+      console.log("Processing Booked - moving from Unbooked to Booked");
+
+      const warehouses = await Warehouse.find({ isActive: true });
+
+      for (const item of salesOrder.items) {
+        const itemProductId =
+          item.productId && item.productId._id
+            ? item.productId._id.toString()
+            : item.productId.toString();
+        let quantityToBook = item.quantity;
+
+        for (const warehouse of warehouses) {
+          if (quantityToBook <= 0) break;
+
+          const stockItem = warehouse.currentStock.find(
+            (stock) =>
+              stock.productId.toString() === itemProductId &&
+              (stock.variantId || null) === (item.variantId || null)
+          );
+
+          if (stockItem && stockItem.Unbooked > 0) {
+            const bookQty = Math.min(stockItem.Unbooked, quantityToBook);
+
+            stockItem.Unbooked -= bookQty;
+
+            if (!stockItem.Booked) {
+              stockItem.Booked = 0;
+            }
+            stockItem.Booked += bookQty;
+
+            quantityToBook -= bookQty;
+
+            await warehouse.save();
+
+            const stockMovement = new StockMovement({
+              productId: item.productId,
+              warehouseId: warehouse._id,
+              movementType: "booked",
+              quantity: bookQty,
+              previousQuantity: stockItem.quantity,
+              newQuantity: stockItem.quantity,
+              referenceType: "sales_order",
+              referenceId: salesOrder._id,
+              notes: `Stock moved to Booked for order ${salesOrder.orderNumber}${item.variantName ? " - " + item.variantName : ""} (PostEx webhook)`,
+              createdBy: salesOrder.createdBy || null,
+            });
+            await stockMovement.save();
+          }
+        }
+      }
+    }
+
+    // Handle OUT FOR DELIVERY status - move from Booked to OutForDelivery
+    if (internalStatus === "OutForDelivery") {
+      console.log("Processing OutForDelivery - moving from Booked to OutForDelivery");
+
+      const warehouses = await Warehouse.find({ isActive: true });
+
+      for (const item of salesOrder.items) {
+        const itemProductId =
+          item.productId && item.productId._id
+            ? item.productId._id.toString()
+            : item.productId.toString();
+        let quantityToMove = item.quantity;
+
+        for (const warehouse of warehouses) {
+          if (quantityToMove <= 0) break;
+
+          const stockItem = warehouse.currentStock.find(
+            (stock) =>
+              stock.productId.toString() === itemProductId &&
+              (stock.variantId || null) === (item.variantId || null)
+          );
+
+          if (stockItem && stockItem.Booked > 0) {
+            const moveQty = Math.min(stockItem.Booked, quantityToMove);
+
+            stockItem.Booked -= moveQty;
+
+            if (!stockItem.OutForDelivery) {
+              stockItem.OutForDelivery = 0;
+            }
+            stockItem.OutForDelivery += moveQty;
+
+            quantityToMove -= moveQty;
+
+            await warehouse.save();
+
+            const stockMovement = new StockMovement({
+              productId: item.productId,
+              warehouseId: warehouse._id,
+              movementType: "out",
+              quantity: moveQty,
+              previousQuantity: stockItem.quantity,
+              newQuantity: stockItem.quantity,
+              referenceType: "sales_order",
+              referenceId: salesOrder._id,
+              notes: `Stock moved to OutForDelivery for order ${salesOrder.orderNumber}${item.variantName ? " - " + item.variantName : ""} (PostEx webhook)`,
+              createdBy: salesOrder.createdBy || null,
+            });
+            await stockMovement.save();
+          }
+        }
+      }
+    }
+
+    // Handle DELIVERED status - move from appropriate previous status to Delivered
+    if (internalStatus === "Delivered") {
+      console.log("Processing Delivered - moving to Delivered column");
+
+      const warehouses = await Warehouse.find({ isActive: true });
+
+      for (const item of salesOrder.items) {
+        const itemProductId =
+          item.productId && item.productId._id
+            ? item.productId._id.toString()
+            : item.productId.toString();
+        let quantityToDeliver = item.quantity;
+
+        for (const warehouse of warehouses) {
+          if (quantityToDeliver <= 0) break;
+
+          const stockItem = warehouse.currentStock.find(
+            (stock) =>
+              stock.productId.toString() === itemProductId &&
+              (stock.variantId || null) === (item.variantId || null)
+          );
+
+          if (stockItem) {
+            // Try to move from OutForDelivery first, then Booked as fallback
+            let sourceQty = stockItem.OutForDelivery || 0;
+            let sourceField = "OutForDelivery";
+
+            if (sourceQty === 0) {
+              sourceQty = stockItem.Booked || 0;
+              sourceField = "Booked";
+            }
+
+            if (sourceQty > 0) {
+              const deliverQty = Math.min(sourceQty, quantityToDeliver);
+
+              stockItem[sourceField] -= deliverQty;
+
+              if (!stockItem.Delivered) {
+                stockItem.Delivered = 0;
+              }
+              stockItem.Delivered += deliverQty;
+
+              quantityToDeliver -= deliverQty;
+
+              await warehouse.save();
+
+              const stockMovement = new StockMovement({
+                productId: item.productId,
+                warehouseId: warehouse._id,
+                movementType: "delivered",
+                quantity: deliverQty,
+                previousQuantity: stockItem.quantity,
+                newQuantity: stockItem.quantity,
+                referenceType: "sales_order",
+                referenceId: salesOrder._id,
+                notes: `Stock delivered for order ${salesOrder.orderNumber}${item.variantName ? " - " + item.variantName : ""} (from ${sourceField}) (PostEx webhook)`,
+                createdBy: salesOrder.createdBy || null,
+              });
+              await stockMovement.save();
+            }
+          }
+        }
+      }
+    }
+
+    // Handle CANCELLED status - move back to main quantity from any status
+    if (internalStatus === "cancelled") {
+      console.log("Processing cancellation - returning stock to main quantity");
+
+      const warehouses = await Warehouse.find({ isActive: true });
+
+      for (const item of salesOrder.items) {
+        const itemProductId =
+          item.productId && item.productId._id
+            ? item.productId._id.toString()
+            : item.productId.toString();
+        let quantityToReturn = item.quantity;
+
+        for (const warehouse of warehouses) {
+          if (quantityToReturn <= 0) break;
+
+          const stockItem = warehouse.currentStock.find(
+            (stock) =>
+              stock.productId.toString() === itemProductId &&
+              (stock.variantId || null) === (item.variantId || null)
+          );
+
+          if (stockItem) {
+            const statusFields = [
+              "Unbooked",
+              "Booked",
+              "PostExWareHouse",
+              "OutForDelivery",
+              "Delivered",
+              "Returned",
+              "UnAssignedByMe",
+              "Expired",
+              "DeliveryUnderReview",
+              "PickedByPostEx",
+              "OutForReturn",
+              "Attempted",
+              "EnRouteToPostExwarehouse",
+            ];
+
+            for (const field of statusFields) {
+              if (quantityToReturn <= 0) break;
+
+              const fieldQty = stockItem[field] || 0;
+              if (fieldQty > 0) {
+                const returnQty = Math.min(fieldQty, quantityToReturn);
+
+                stockItem[field] -= returnQty;
+                stockItem.quantity += returnQty;
+                quantityToReturn -= returnQty;
+
+                await warehouse.save();
+
+                const stockMovement = new StockMovement({
+                  productId: item.productId,
+                  warehouseId: warehouse._id,
+                  movementType: "cancelled_return",
+                  quantity: returnQty,
+                  previousQuantity: stockItem.quantity - returnQty,
+                  newQuantity: stockItem.quantity,
+                  referenceType: "sales_order",
+                  referenceId: salesOrder._id,
+                  notes: `Stock returned to main quantity due to cancellation ${salesOrder.orderNumber}${item.variantName ? " - " + item.variantName : ""} (from ${field}) (PostEx webhook)`,
+                  createdBy: salesOrder.createdBy || null,
+                });
+                await stockMovement.save();
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Update sales order status and tracking number
+    salesOrder.status = internalStatus;
+    if (trackingNumber) {
+      salesOrder.trackingNumber = trackingNumber;
+    }
+    if (statusUpdateDatetime) {
+      salesOrder.actualDeliveryDate = new Date(statusUpdateDatetime);
+    }
+
+    await salesOrder.save();
+
+    console.log("Status updated successfully to:", salesOrder.status);
+
+    // Create audit log (using system user if no user available)
+    try {
+      await createAuditLog(
+        salesOrder.createdBy || null,
+        "system",
+        "sales_order_status_updated",
+        "SalesOrder",
+        salesOrder._id,
+        { status: oldStatus },
+        { status: salesOrder.status, trackingNumber },
+        { orderNumber: salesOrder.orderNumber, source: "PostEx webhook" },
+        req
+      );
+    } catch (auditError) {
+      console.error("Failed to create audit log:", auditError);
+      // Don't fail the webhook if audit log fails
     }
 
     // Always respond with success
     res.status(200).json({
       status: "success",
-      message: "Webhook received successfully",
+      message: "Webhook processed successfully",
+      orderNumber: salesOrder.orderNumber,
+      oldStatus,
+      newStatus: salesOrder.status,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -249,7 +634,6 @@ console.log("webhook data is:", webhookData);
     });
   }
 });
-
 // --------------------
 // 🩺 Health Check Route
 // --------------------
