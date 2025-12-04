@@ -181,8 +181,7 @@ const updateSalesOrder = async (req, res) => {
   }
 };
 const updatePostExStatus = async (req, res) => {
-  const { id, postExStatus } = req.body;
-  console.log("PostEx status update request:", { id, postExStatus });
+  const { id, postExStatus, trackingNumber } = req.body;
   try {
     const salesOrder = await SalesOrder.findById(id);
     if (!salesOrder) {
@@ -190,6 +189,8 @@ const updatePostExStatus = async (req, res) => {
     }
 
     salesOrder.proceededToPostEx = postExStatus;
+    salesOrder.trackingNumber = trackingNumber;
+
     await salesOrder.save();
 
     res.json({
@@ -293,7 +294,6 @@ const submitSalesOrder = async (req, res) => {
     res.status(500).json({ error: "Failed to submit sales order" });
   }
 };
-
 
 // Generate PDF receipt for sales order
 const generateSalesReceipt = async (salesOrder) => {
