@@ -32,6 +32,21 @@ const cityReportRoutes = require('./routes/cityReports');
 const expectedReturnRoutes = require('./routes/expectedReturns');
 const customerRoutes = require('./routes/customers');
 const postExRoutes = require('./routes/postEx');
+const oldCrmRoutes = require('./routes/oldCrm');
+
+// Load Chatwoot routes with error handling
+let chatwootRoutes;
+try {
+  chatwootRoutes = require('./routes/chatwoot');
+  console.log('✅ Chatwoot routes loaded successfully');
+} catch (error) {
+  console.error('❌ Error loading Chatwoot routes:', error);
+  // Create a dummy router to prevent server crash
+  chatwootRoutes = require('express').Router();
+  chatwootRoutes.get('*', (req, res) => {
+    res.status(500).json({ error: 'Chatwoot routes failed to load', details: error.message });
+  });
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -199,6 +214,8 @@ app.use('/api/city-reports', cityReportRoutes);
 app.use('/api/expected-returns', expectedReturnRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/postex', postExRoutes);
+app.use('/api/old-crm', oldCrmRoutes);
+app.use('/api/chatwoot', chatwootRoutes);
 
 // --------------------
 // 🩺 Health Check Route
