@@ -14,43 +14,6 @@ try {
 }
 
 // Import route files
-<<<<<<< HEAD
-const authRoutes = require('./routes/auth');
-const productRoutes = require('./routes/products');
-const supplierRoutes = require('./routes/suppliers');
-const salesRoutes = require('./routes/sales');
-const purchaseRoutes = require('./routes/purchases');
-const salesOrderRoutes = require('./routes/salesOrders');
-const purchaseOrderRoutes = require('./routes/purchaseOrders');
-const warehouseRoutes = require('./routes/warehouses');
-const dispatchRoutes = require('./routes/dispatches');
-const receiptRoutes = require('./routes/receipts');
-const returnRoutes = require('./routes/returns');
-const invoiceRoutes = require('./routes/invoices');
-const stockRoutes = require('./routes/stock');
-const userRoutes = require('./routes/users');
-const dashboardRoutes = require('./routes/dashboard');
-const reportRoutes = require('./routes/reports');
-const cityReportRoutes = require('./routes/cityReports');
-const expectedReturnRoutes = require('./routes/expectedReturns');
-const customerRoutes = require('./routes/customers');
-const postExRoutes = require('./routes/postEx');
-const oldCrmRoutes = require('./routes/oldCrm');
-
-// Load Chatwoot routes with error handling
-let chatwootRoutes;
-try {
-  chatwootRoutes = require('./routes/chatwoot');
-  console.log('✅ Chatwoot routes loaded successfully');
-} catch (error) {
-  console.error('❌ Error loading Chatwoot routes:', error);
-  // Create a dummy router to prevent server crash
-  chatwootRoutes = require('express').Router();
-  chatwootRoutes.get('*', (req, res) => {
-    res.status(500).json({ error: 'Chatwoot routes failed to load', details: error.message });
-  });
-}
-=======
 const authRoutes = require("./routes/auth");
 const productRoutes = require("./routes/products");
 const supplierRoutes = require("./routes/suppliers");
@@ -71,7 +34,24 @@ const cityReportRoutes = require("./routes/cityReports");
 const expectedReturnRoutes = require("./routes/expectedReturns");
 const customerRoutes = require("./routes/customers");
 const postExRoutes = require("./routes/postEx");
->>>>>>> cde4671297590b3067ca11211b1e4e77c1c218e1
+const oldCrmRoutes = require("./routes/oldCrm");
+
+// Load Chatwoot routes with error handling
+let chatwootRoutes;
+try {
+  chatwootRoutes = require("./routes/chatwoot");
+  console.log("✅ Chatwoot routes loaded successfully");
+} catch (error) {
+  console.error("❌ Error loading Chatwoot routes:", error);
+  // Create a dummy router to prevent server crash
+  chatwootRoutes = require("express").Router();
+  chatwootRoutes.get("*", (req, res) => {
+    res.status(500).json({
+      error: "Chatwoot routes failed to load",
+      details: error.message,
+    });
+  });
+}
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -95,6 +75,7 @@ const allowedOrigins = [
   "http://127.0.0.1:8080",
 ].filter(Boolean);
 
+// Enhanced CORS configuration to handle preflight requests
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -104,6 +85,16 @@ app.use(
 
       // Allow all localhost origins (for local development)
       if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
+        return callback(null, true);
+      }
+
+      // Allow Vercel frontend domains (more flexible matching)
+      if (
+        origin.includes("vercel.app") ||
+        origin.includes("tml-frontend") ||
+        origin.startsWith("https://tml-frontend")
+      ) {
+        console.log("✅ Allowing Vercel origin:", origin);
         return callback(null, true);
       }
 
@@ -122,10 +113,41 @@ app.use(
       "X-Requested-With",
       "Accept",
       "Origin",
+      "api_access_token", // For Chatwoot API
     ],
+    exposedHeaders: ["Content-Range", "X-Content-Range"],
     credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204, // Some legacy browsers (IE11, various SmartTVs) choke on 204
   })
 );
+
+// Handle preflight requests explicitly with same CORS config
+app.options("*", (req, res) => {
+  const origin = req.headers.origin;
+  
+  // Check if origin should be allowed (same logic as main CORS)
+  if (!origin) {
+    res.header("Access-Control-Allow-Origin", "*");
+  } else if (
+    origin.includes("localhost") ||
+    origin.includes("127.0.0.1") ||
+    origin.includes("vercel.app") ||
+    origin.includes("tml-frontend") ||
+    origin.startsWith("https://tml-frontend") ||
+    allowedOrigins.includes(origin)
+  ) {
+    res.header("Access-Control-Allow-Origin", origin);
+    console.log("✅ Preflight: Allowing origin:", origin);
+  } else {
+    console.warn("❌ Preflight: Blocking origin:", origin);
+  }
+  
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin, api_access_token");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.status(204).end();
+});
 
 app.use(express.json());
 
@@ -236,30 +258,6 @@ mongoose.connection.on("error", (err) => {
 // --------------------
 // 🧩 API Route Mounting
 // --------------------
-<<<<<<< HEAD
-app.use('/api/auth', authRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/suppliers', supplierRoutes);
-app.use('/api/sales', salesRoutes);
-app.use('/api/purchases', purchaseRoutes);
-app.use('/api/sales-orders', salesOrderRoutes);
-app.use('/api/purchase-orders', purchaseOrderRoutes);
-app.use('/api/warehouses', warehouseRoutes);
-app.use('/api/dispatches', dispatchRoutes);
-app.use('/api/receipts', receiptRoutes);
-app.use('/api/returns', returnRoutes);
-app.use('/api/invoices', invoiceRoutes);
-app.use('/api/stocks', stockRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/city-reports', cityReportRoutes);
-app.use('/api/expected-returns', expectedReturnRoutes);
-app.use('/api/customers', customerRoutes);
-app.use('/api/postex', postExRoutes);
-app.use('/api/old-crm', oldCrmRoutes);
-app.use('/api/chatwoot', chatwootRoutes);
-=======
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/suppliers", supplierRoutes);
@@ -280,7 +278,8 @@ app.use("/api/city-reports", cityReportRoutes);
 app.use("/api/expected-returns", expectedReturnRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/postex", postExRoutes);
->>>>>>> cde4671297590b3067ca11211b1e4e77c1c218e1
+app.use("/api/old-crm", oldCrmRoutes);
+app.use("/api/chatwoot", chatwootRoutes);
 
 // route  for postEX  webhook
 app.post("/webhook/postex-updates", async (req, res) => {
