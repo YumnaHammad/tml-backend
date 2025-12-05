@@ -524,16 +524,53 @@ const getAllSalesOrders = async (req, res) => {
 // Get all sales orders
 const getApprovedSalesOrders = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10, startDate, endDate } = req.query;
 
     // Only fetch sales orders with qcStatus = "approved"
     let query = { qcStatus: "approved" };
+
+    // Add date filtering by orderDate (actual sales date)
+    if (startDate || endDate) {
+      console.log("Date filter received:", { startDate, endDate });
+      // Filter STRICTLY by orderDate (actual sales date) ONLY
+      // Do NOT use timestamp or createdAt - they are not sales dates
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        // Ensure dates are properly set (handle timezone issues)
+        // Use UTC to avoid timezone problems
+        start.setUTCHours(0, 0, 0, 0);
+        end.setUTCHours(23, 59, 59, 999);
+        // Only filter by orderDate - the actual sales date
+        query.orderDate = { $gte: start, $lte: end };
+        console.log("Date range query:", { start: start.toISOString(), end: end.toISOString() });
+      } else if (startDate) {
+        const start = new Date(startDate);
+        start.setUTCHours(0, 0, 0, 0);
+        query.orderDate = { $gte: start };
+        console.log("Start date query:", { start: start.toISOString() });
+      } else if (endDate) {
+        const end = new Date(endDate);
+        end.setUTCHours(23, 59, 59, 999);
+        query.orderDate = { $lte: end };
+        console.log("End date query:", { end: end.toISOString() });
+      }
+    }
 
     // Convert limit and page to numbers, with safety limits
     const pageNum = Math.max(1, parseInt(page) || 1);
     const requestedLimit = parseInt(limit) || 10;
 
-    let limitNum = Math.min(1000, Math.max(1, requestedLimit));
+    // When date filtering is applied, show all results (no pagination limit)
+    const isDateFiltered = startDate || endDate;
+    let limitNum;
+    if (isDateFiltered) {
+      // When date filtered, show all results (up to 10000 for safety)
+      limitNum = Math.min(10000, Math.max(1, requestedLimit));
+    } else {
+      // Normal pagination when not date filtered
+      limitNum = Math.min(1000, Math.max(1, requestedLimit));
+    }
 
     // Determine sort order - default to newest first (orderDate descending)
     let sortOrder = { orderDate: -1 }; // Default: newest first
@@ -543,9 +580,12 @@ const getApprovedSalesOrders = async (req, res) => {
       .populate("createdBy", "firstName lastName")
       .sort(sortOrder)
       .limit(limitNum)
-      .skip((pageNum - 1) * limitNum);
+      .skip(isDateFiltered ? 0 : (pageNum - 1) * limitNum); // Skip pagination when date filtered
 
     const total = await SalesOrder.countDocuments(query);
+
+    console.log("Final query for approved sales:", JSON.stringify(query, null, 2));
+    console.log("Total approved sales found:", total);
 
     res.json({
       salesOrders,
