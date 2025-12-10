@@ -121,7 +121,8 @@ const salesOrderSchema = new mongoose.Schema(
     },
     qcType: {
       type: String,
-      enum: ["postex", "postoffice"],
+      enum: ["postex", "postoffice", null], // Explicitly allow null
+      required: false,
       default: null,
     },
     proceededToPostEx: { type: Boolean, default: false },

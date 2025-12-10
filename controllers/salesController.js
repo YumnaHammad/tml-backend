@@ -2097,11 +2097,11 @@ const updateQCStatus = async (req, res) => {
       }
     } else if (qcStatus === "pending" || qcStatus === "rejected") {
       // Clear qcType when status is pending or rejected
-      salesOrder.qcType = null;
+      salesOrder.qcType = null; // Now null is allowed in enum
       console.log(`🔄 QC ${qcStatus}: Order ${salesOrder.orderNumber} - Cleared qcType`);
     } else if (qcStatus === "approved" && !qcType) {
       // If approved without qcType, clear it to ensure it doesn't appear in either module
-      salesOrder.qcType = null;
+      salesOrder.qcType = null; // Now null is allowed in enum
       console.log(`⚠️ QC Approved without qcType: Order ${salesOrder.orderNumber} - Cleared qcType (will not appear in any module)`);
     }
 
