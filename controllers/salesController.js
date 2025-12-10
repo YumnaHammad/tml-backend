@@ -521,13 +521,118 @@ const getAllSalesOrders = async (req, res) => {
   }
 };
 
+// Get Post Office orders (sales orders with CN numbers)
+const getPostOfficeOrders = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, startDate, endDate, search, status, city } = req.query;
+
+    // Fetch sales orders with CN numbers AND Post Office QC approved
+    // This ensures only Post Office QC approved sales appear in Post Office Orders module
+    let query = { 
+      "customerInfo.cnNumber": { $exists: true, $ne: null, $ne: "" },
+      qcStatus: "approved",
+      qcType: "postoffice"
+    };
+
+    // Filter by status if provided
+    if (status) {
+      query.status = status;
+    }
+    
+    // Filter by city if provided
+    if (city) {
+      query["customerInfo.address.city"] = new RegExp(city, "i");
+    }
+
+    // Add date filtering by orderDate
+    if (startDate || endDate) {
+      console.log("Date filter received:", { startDate, endDate });
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        start.setUTCHours(0, 0, 0, 0);
+        end.setUTCHours(23, 59, 59, 999);
+        query.orderDate = { $gte: start, $lte: end };
+      } else if (startDate) {
+        const start = new Date(startDate);
+        start.setUTCHours(0, 0, 0, 0);
+        query.orderDate = { $gte: start };
+      } else if (endDate) {
+        const end = new Date(endDate);
+        end.setUTCHours(23, 59, 59, 999);
+        query.orderDate = { $lte: end };
+      }
+    }
+
+    // Add search functionality
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), "i");
+      const searchConditions = [
+        { "customerInfo.cnNumber": searchRegex },
+        { "customerInfo.phone": searchRegex },
+        { "customerInfo.name": searchRegex },
+        { orderNumber: searchRegex },
+      ];
+      query.$and = query.$and || [];
+      query.$and.push({ $or: searchConditions });
+    }
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const requestedLimit = parseInt(limit) || 10;
+    const isDateFiltered = startDate || endDate;
+    
+    let limitNum;
+    if (isDateFiltered) {
+      limitNum = Math.min(10000, Math.max(1, requestedLimit));
+    } else {
+      limitNum = Math.min(1000, Math.max(1, requestedLimit));
+    }
+
+    let sortOrder = { orderDate: -1 };
+
+    const salesOrders = await SalesOrder.find(query)
+      .populate("items.productId", "name sku")
+      .populate("createdBy", "firstName lastName")
+      .sort(sortOrder)
+      .limit(limitNum)
+      .skip(isDateFiltered ? 0 : (pageNum - 1) * limitNum);
+
+    const total = await SalesOrder.countDocuments(query);
+
+    res.json({
+      salesOrders,
+      totalPages: Math.ceil(total / limitNum),
+      currentPage: pageNum,
+      total,
+    });
+  } catch (error) {
+    console.error("Get Post Office orders error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 // Get all sales orders
 const getApprovedSalesOrders = async (req, res) => {
   try {
     const { page = 1, limit = 10, startDate, endDate } = req.query;
 
-    // Only fetch sales orders with qcStatus = "approved"
-    let query = { qcStatus: "approved" };
+    // Only fetch sales orders with qcStatus = "approved" and qcType = "postex" (or null for backward compatibility)
+    // This ensures only PostEx QC approved sales appear in Approved Sales module
+    // CRITICAL: Explicitly exclude Post Office QC approved sales (qcType: "postoffice")
+    // Approved Sales module is ONLY for PostEx QC approved - NO connection with Post Office
+    let query = { 
+      qcStatus: "approved",
+      // Explicitly exclude Post Office QC approved sales
+      qcType: { $ne: "postoffice" },
+      // Include only PostEx QC approved or legacy approved (null/undefined for backward compatibility)
+      $or: [
+        { qcType: "postex" },
+        { qcType: null }, // Backward compatibility for existing approved sales (before qcType was added)
+        { qcType: { $exists: false } } // Backward compatibility for existing approved sales
+      ]
+    };
+    
+    console.log("🔍 Approved Sales Query - Excluding Post Office QC approved:", JSON.stringify(query, null, 2));
 
     // Add date filtering by orderDate (actual sales date)
     if (startDate || endDate) {
@@ -582,13 +687,44 @@ const getApprovedSalesOrders = async (req, res) => {
       .limit(limitNum)
       .skip(isDateFiltered ? 0 : (pageNum - 1) * limitNum); // Skip pagination when date filtered
 
-    const total = await SalesOrder.countDocuments(query);
+    // CRITICAL: Additional safety filter to ensure NO Post Office QC approved sales slip through
+    // This is a double-check to ensure complete separation between PostEx and Post Office modules
+    const filteredOrders = salesOrders.filter(order => {
+      // Only include if it's PostEx QC approved or legacy (null/undefined)
+      // Explicitly exclude Post Office QC approved
+      const isPostEx = order.qcType === "postex";
+      const isLegacy = order.qcType === null || order.qcType === undefined;
+      const isNotPostOffice = order.qcType !== "postoffice";
+      
+      const shouldInclude = (isPostEx || isLegacy) && isNotPostOffice;
+      
+      if (!shouldInclude) {
+        console.log(`⚠️ FILTERED OUT from Approved Sales: Order ${order.orderNumber} - qcType: ${order.qcType}, qcStatus: ${order.qcStatus}`);
+      }
+      
+      return shouldInclude;
+    });
+    
+    console.log(`✅ Approved Sales: Found ${salesOrders.length} orders from DB, filtered to ${filteredOrders.length} PostEx QC approved orders`);
+    console.log(`📊 Orders filtered out: ${salesOrders.length - filteredOrders.length}`);
+
+    // Count only PostEx QC approved sales (excluding Post Office)
+    const totalQuery = { 
+      qcStatus: "approved",
+      qcType: { $ne: "postoffice" },
+      $or: [
+        { qcType: "postex" },
+        { qcType: null },
+        { qcType: { $exists: false } }
+      ]
+    };
+    const total = await SalesOrder.countDocuments(totalQuery);
 
     console.log("Final query for approved sales:", JSON.stringify(query, null, 2));
-    console.log("Total approved sales found:", total);
+    console.log("Total PostEx QC approved sales found:", total);
 
     res.json({
-      salesOrders,
+      salesOrders: filteredOrders, // Use filtered orders - ONLY PostEx QC approved
       totalPages: Math.ceil(total / limitNum),
       currentPage: pageNum,
       total,
@@ -1930,11 +2066,17 @@ const deleteSalesOrder = async (req, res) => {
 const updateQCStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { qcStatus } = req.body;
+    const { qcStatus, qcType } = req.body;
 
     if (!qcStatus || !["pending", "approved", "rejected"].includes(qcStatus)) {
       return res.status(400).json({
         error: "Invalid QC status. Must be pending, approved, or rejected",
+      });
+    }
+
+    if (qcType && !["postex", "postoffice"].includes(qcType)) {
+      return res.status(400).json({
+        error: "Invalid QC type. Must be postex or postoffice",
       });
     }
 
@@ -1944,7 +2086,28 @@ const updateQCStatus = async (req, res) => {
     }
 
     salesOrder.qcStatus = qcStatus;
+    // Set qcType only when approving (to differentiate PostEx vs Post Office)
+    if (qcStatus === "approved" && qcType) {
+      salesOrder.qcType = qcType;
+      console.log(`✅ QC Approved: Order ${salesOrder.orderNumber} - Set qcType to "${qcType}"`);
+      if (qcType === "postoffice") {
+        console.log(`📦 Post Office QC Approved: Order ${salesOrder.orderNumber} will appear in Post Office Orders module ONLY`);
+      } else if (qcType === "postex") {
+        console.log(`📮 PostEx QC Approved: Order ${salesOrder.orderNumber} will appear in Approved Sales module ONLY`);
+      }
+    } else if (qcStatus === "pending" || qcStatus === "rejected") {
+      // Clear qcType when status is pending or rejected
+      salesOrder.qcType = null;
+      console.log(`🔄 QC ${qcStatus}: Order ${salesOrder.orderNumber} - Cleared qcType`);
+    } else if (qcStatus === "approved" && !qcType) {
+      // If approved without qcType, clear it to ensure it doesn't appear in either module
+      salesOrder.qcType = null;
+      console.log(`⚠️ QC Approved without qcType: Order ${salesOrder.orderNumber} - Cleared qcType (will not appear in any module)`);
+    }
+
     await salesOrder.save();
+    
+    console.log(`💾 Saved: Order ${salesOrder.orderNumber} - qcStatus: ${salesOrder.qcStatus}, qcType: ${salesOrder.qcType}`);
 
     res.json({
       message: `QC status updated to ${qcStatus}`,
@@ -2183,4 +2346,5 @@ module.exports = {
   checkDuplicatePhoneNumbers,
   checkPhoneNumberDuplicates,
   getApprovedSalesOrders,
+  getPostOfficeOrders,
 };

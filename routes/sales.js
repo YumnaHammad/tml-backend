@@ -3,6 +3,7 @@ const {
   createSalesOrder,
   getAllSalesOrders,
   getApprovedSalesOrders,
+  getPostOfficeOrders,
   getSalesOrderById,
   updateSalesOrder,
   updateSalesOrderStatus,
@@ -20,6 +21,7 @@ const router = express.Router();
 // Routes with optional authentication
 router.get("/", optionalAuthenticate, getAllSalesOrders);
 router.get("/approved",optionalAuthenticate, getApprovedSalesOrders);
+router.get("/post-office", optionalAuthenticate, getPostOfficeOrders);
 router.get(
   "/check-duplicate-phones",
   optionalAuthenticate,

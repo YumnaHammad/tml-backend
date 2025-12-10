@@ -119,6 +119,11 @@ const salesOrderSchema = new mongoose.Schema(
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
+    qcType: {
+      type: String,
+      enum: ["postex", "postoffice"],
+      default: null,
+    },
     proceededToPostEx: { type: Boolean, default: false },
     paymentStatus: {
       type: String,
